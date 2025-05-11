@@ -28,28 +28,49 @@ import {
   clearProgressiveSound,
   playMIDINote,
   hasMIDISequence,
-  setMIDIVolume
+  setMIDIVolume,
+  setMIDITonality,
+  MIDI_INSTRUMENT_PRESETS,
+  MIDIInstrumentPresetKey,
+  setMIDIInstrumentPreset,
+  setMIDITrackIndex,
+  hasCustomSound,
+  CustomSoundType,
+  playGameStartSound,
+  playRandomSound,
+  playWallSound
 } from '../utils/sounds';
 import { useGameRecorder } from '../utils/recorder';
 
 // Physics parameters for realistic bouncing
-const DEFAULT_GRAVITY = 0.8;         // Gravité plus forte pour un mouvement plus réaliste
-const DEFAULT_GROWTH_RATE = 0.7;
-const DEFAULT_BOUNCINESS = 0.85;     // Augmenter la valeur par défaut pour plus de rebond
-const DEFAULT_FRICTION = 0.98;       // Garder une friction modérée
+const DEFAULT_GRAVITY = 0.0;         // MODIFIED: Gravité à zéro pour que la balle ne tombe pas
+const DEFAULT_GROWTH_RATE = 1.0;      // Taux de croissance
+const DEFAULT_BOUNCINESS = 1.0;      // MODIFIED: Rebond parfait, pas de perte d'énergie
+const DEFAULT_FRICTION = 1.0;       // MODIFIED: Pas de friction sur les rebonds muraux (surtout sol)
 const DEFAULT_BRIGHTNESS_INCREASE = 5;
-const DEFAULT_SPEED = 7;             // Vitesse initiale modérée
-const WALL_PADDING = 3;
-const MAX_VELOCITY = 15;             // Augmenter la vitesse maximale pour permettre des rebonds plus énergiques
-const MIN_VELOCITY = 2.0;            // Vitesse minimale réduite pour permettre aux balles de ralentir naturellement
-const SPEED_CAP_AFTER_BOUNCE = 15;   // Augmenter aussi cette limite
-const RANDOM_FORCE_INTERVAL = 5000;  // Forces aléatoires moins fréquentes
-const RANDOM_FORCE_MAGNITUDE = 0.5;  // Forces aléatoires plus faibles
+const DEFAULT_SPEED = 12;             // Vitesse initiale légèrement augmentée
+const WALL_PADDING = 0.05;
+const MAX_VELOCITY = 35;              // Limite de vitesse augmentée (un peu plus pour gérer les rebonds forts)
+const MIN_VELOCITY = 1.5;             // MODIFIED: Vitesse minimale (légèrement augmentée)
+const SPEED_CAP_AFTER_BOUNCE = 30;    // MODIFIED: Augmenté pour plus d'énergie après rebond mural - CETTE VALEUR SERA IGNORÉE DANS handleWallCollision
+const RANDOM_FORCE_INTERVAL = 4000;   // Forces aléatoires pour un peu de variété
+const RANDOM_FORCE_MAGNITUDE = 0.0;  // MODIFIED: Pas de forces aléatoires pour ne pas affecter la vitesse
 const MAX_BALLS = 5;
-const COLLISION_THRESHOLD = 0.1;     // Seuil de collision plus élevé
-const GRAVITY_SCALING = 1.1;         // Réduire légèrement la gravité pour des rebonds plus hauts
-const AIR_RESISTANCE = 0.999;        // MODIFICATION: Réduire au minimum la résistance de l'air (presque pas de perte)
-const VELOCITY_DAMPING = 0.998;      // MODIFICATION: Réduire l'amortissement pour maintenir l'énergie
+const COLLISION_THRESHOLD = 0.05;
+const GRAVITY_SCALING = 0.25;         // Scaling de gravité ajusté
+const AIR_RESISTANCE = 1.0;         // MODIFIED: Pas de résistance à l'air
+const VELOCITY_DAMPING = 1.0;       // MODIFIED: Pas d'amortissement général de la vélocité
+const TRAIL_EFFECT = true;
+const MAX_BALL_RADIUS_FACTOR = 0.99;
+const MAINTAIN_CONSTANT_SPEED = false; // La gravité nécessite des changements de vitesse
+const SMOOTH_COLLISIONS = true;
+const WALL_BOUNCE_FORCE = 0.0;        // MODIFIED: Pas de force additionnelle au rebond mural
+const WALL_MARGIN = 5.0;
+const WALL_IMMUNITY_TIME = 150;       // Temps d'immunité réduit
+const RANDOM_BOUNCE_ANGLE = true;
+const RANDOM_ANGLE_MAX = 0.15;
+const REALISTIC_GRAVITY = true;
+const WALL_TANGENTIAL_FRICTION = 1.0; // MODIFIED: Pas de friction tangentielle sur les murs
 
 // Explicitly define the allowed types for music scales
 type MusicScaleKey = 'majorScale' | 'minorScale' | 'pentatonic' | 'blues' | 'jazz' | 'eastern';
@@ -84,6 +105,9 @@ interface GrowingBallProps extends GameProps {
   onVolumeChange?: (type: 'bounce' | 'progressive', value: number) => void;
   midiEnabled?: boolean;
   midiVolume?: number;
+  midiTonality?: string; // New prop: Tonality for MIDI sounds (e.g. "C", "D", "F#")
+  midiInstrumentPreset?: MIDIInstrumentPresetKey;
+  midiTrackIndex?: number | null;
 }
 
 interface EnhancedBall extends Ball {
@@ -95,6 +119,7 @@ interface EnhancedBall extends Ball {
   score?: number;
   image?: HTMLImageElement | null;
   lastCollisionTime?: number;
+  lastWallCollisionTime?: number; // Nouveau: temps de la dernière collision avec un mur
   imageIndex?: number;
   growing?: boolean;        // Added property for growth on click
   musicScale?: MusicScaleKey | CustomMusicKey; // La gamme musicale associée à la balle
@@ -132,6 +157,14 @@ const recordingStyles = {
   },
 };
 
+// Format recording time from milliseconds to MM:SS format
+const formatRecordingTime = (milliseconds: number): string => {
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+};
+
 const GrowingBall: React.FC<GrowingBallProps> = ({ 
   isPlaying, 
   onGameEnd,
@@ -163,7 +196,10 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
   progressiveSoundVolume = 0.7, // Default progressive sound volume
   onVolumeChange,
   midiEnabled = false,
-  midiVolume = 0.7
+  midiVolume = 0.7,
+  midiTonality = "C", // Default tonality is C
+  midiInstrumentPreset = MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING,
+  midiTrackIndex = null
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
@@ -284,6 +320,27 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     setHasProgressiveFile(hasProgressiveSound());
   }, []);
   
+  // MODIFICATION: Ajouter des useEffect pour les nouveaux contrôles MIDI
+  useEffect(() => {
+    if (midiEnabled && midiInstrumentPreset) { // midiInstrumentPreset peut être undefined si non fourni par le parent
+      setMIDIInstrumentPreset(midiInstrumentPreset);
+    } else if (midiEnabled) {
+      // Si activé mais pas de preset fourni, s'assurer que le son est sur défaut.
+      // setMIDIInstrumentPreset attend un preset ou null.
+      // Si la prop est undefined, on peut explicitement passer null pour le comportement par défaut.
+      setMIDIInstrumentPreset(MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING); 
+    }
+  }, [midiEnabled, midiInstrumentPreset]);
+
+  useEffect(() => {
+    if (midiEnabled && midiTrackIndex !== undefined) { // midiTrackIndex peut être 0 ou null
+      setMIDITrackIndex(midiTrackIndex);
+    } else if (midiEnabled) {
+      // Si activé mais pas d'index fourni, s'assurer qu'il est sur null (toutes pistes principales)
+      setMIDITrackIndex(null);
+    }
+  }, [midiEnabled, midiTrackIndex]);
+  
   // Cap velocity to prevent extreme speeds
   const capVelocity = (vx: number, vy: number, maxSpeed: number): {x: number, y: number} => {
     const speed = Math.sqrt(vx * vx + vy * vy);
@@ -309,27 +366,33 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     return { x: vx, y: vy };
   };
   
-  // Apply a random force to prevent balls from stabilizing
+  // Appliquer des forces aléatoires avec une probabilité fortement réduite
   const applyRandomForce = (balls: EnhancedBall[], timestamp: number): EnhancedBall[] => {
-    // Check if enough time has passed since the last random force
-    if (timestamp - lastRandomForceTime.current < RANDOM_FORCE_INTERVAL) {
-      return balls;
-    }
-    
-    // Update the last random force time
-    lastRandomForceTime.current = timestamp;
-    
-    // Apply random force to each ball with a chance to skip some balls
     return balls.map(ball => {
-      // Only apply force with 75% probability to make movement more natural
-      if (Math.random() > 0.25) {
-        // Random angle with bias toward horizontal movement
-        const angle = Math.random() * Math.PI * 1.5 + Math.PI * 0.25;
+      // Seulement 5% de chance d'appliquer une force aléatoire pour réduire les glitches
+      if (Math.random() > 0.95) {
+        // Calculer l'angle par rapport au centre pour éviter les forces qui centrent la balle
+        const canvas = canvasRef.current;
+        if (!canvas) return ball;
         
-        // Apply force with some randomized magnitude
-        const forceMagnitude = RANDOM_FORCE_MAGNITUDE * (0.7 + Math.random() * 0.6);
-        const forceX = Math.cos(angle) * forceMagnitude;
-        const forceY = Math.sin(angle) * forceMagnitude;
+        const canvasBounds = canvas.getBoundingClientRect();
+        const centerX = canvasBounds.width / 2;
+        const centerY = canvasBounds.height / 2;
+        const dx = ball.position.x - centerX;
+        const dy = ball.position.y - centerY;
+        
+        // Angle dirigé LOIN du centre (pour éviter le centrage)
+        const baseAngle = Math.atan2(dy, dx);
+        // Ajout de variation aléatoire de ±45 degrés
+        const angleVariation = (Math.random() - 0.5) * Math.PI / 2;
+        const finalAngle = baseAngle + angleVariation;
+        
+        // Force très faible
+        const magnitude = RANDOM_FORCE_MAGNITUDE * (0.2 + Math.random() * 0.3);
+        
+        // Composantes X et Y de la force
+        const forceX = Math.cos(finalAngle) * magnitude;
+        const forceY = Math.sin(finalAngle) * magnitude;
       
       return {
         ...ball,
@@ -454,7 +517,7 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
         imageIndex,
         musicScale,
         mass: 15 * 0.5,
-        elasticity: 0.7 + Math.random() * 0.2,
+        elasticity: 1.0, // MODIFIED: Élasticité parfaite pour la conservation de la vitesse
         angularVelocity: (Math.random() - 0.5) * 0.1,
         initialSpeed: initialSpeed  // NOUVEAU: Stocker la vitesse initiale
       });
@@ -498,8 +561,8 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     const angleVariation = (Math.random() - 0.5) * Math.PI / 3;
     const angle = angleBase + angleVariation;
     
-    // Vitesse initiale plus modérée mais variable
-    const speedFactor = 0.7 + Math.random() * 0.6; // 70% à 130% de la vitesse de base
+    // Vitesse initiale plus élevée pour compenser les pertes
+    const speedFactor = 0.9 + Math.random() * 0.7; // 90% à 160% de la vitesse de base
     const speed = ballSpeed * speedFactor;
     
     // Calculer les composantes de vitesse
@@ -512,19 +575,19 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     
     // Initialiser les autres paramètres
     const initialRadius = 10 + Math.random() * 5;
-    const hue = Math.floor(Math.random() * 360);
+      const hue = Math.floor(Math.random() * 360);
     const saturation = 70 + Math.floor(Math.random() * 30);
     const lightness = 50 + Math.floor(Math.random() * 20);
-    
+      
     // Gérer l'image
-    let image = null;
-    let imageIndex = -1;
-    
-    if (useCustomImages && loadedImages.length > 0) {
+      let image = null;
+      let imageIndex = -1;
+      
+      if (useCustomImages && loadedImages.length > 0) {
       if (customImageIndex >= 0 && customImageIndex < loadedImages.length) {
         imageIndex = customImageIndex;
         image = loadedImages[customImageIndex];
-      } else {
+        } else {
         imageIndex = Math.floor(Math.random() * loadedImages.length);
         image = loadedImages[imageIndex];
       }
@@ -532,24 +595,24 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     
     // Créer la balle avec des propriétés réalistes
     const ball: EnhancedBall = {
-      id: Math.random().toString(36).substr(2, 9),
+        id: Math.random().toString(36).substr(2, 9),
       position: { x, y },
-      velocity: { x: vx, y: vy },
+        velocity: { x: vx, y: vy },
       radius: initialRadius,
       color: `hsl(${hue}, ${saturation}%, ${lightness}%)`,
-      pulseEffect: 0,
+        pulseEffect: 0,
       glowSize: 0,
-      glowOpacity: 0.7,
+        glowOpacity: 0.7,
       squash: 1,
-      rotation: 0,
-      score: 0,
-      image,
-      imageIndex,
+        rotation: 0,
+        score: 0,
+        image,
+        imageIndex,
       growing: true,
       lastCollisionTime: 0,
       musicScale,
       mass: initialRadius * 0.5,
-      elasticity: 0.7 + Math.random() * 0.2,
+      elasticity: 1.0, // MODIFIED: Élasticité parfaite pour la conservation de la vitesse
       angularVelocity: (Math.random() - 0.5) * 0.1,
       initialSpeed: initialSpeed  // NOUVEAU: Stocker la vitesse initiale
     };
@@ -559,18 +622,51 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
   
   // Add function to play ball-specific sound
   const playBallSpecificSound = useCallback((volume: number, ballIndex?: number) => {
-    if (useCustomSounds && ballIndex !== undefined && loadedSounds[ballIndex]?.length > 0) {
+    console.log(`[DEBUG BALL SOUND] playBallSpecificSound called with volume=${volume}, ballIndex=${ballIndex}`);
+    console.log(`[DEBUG BALL SOUND] useCustomSounds=${useCustomSounds}, loadedSounds available:`, 
+      Object.keys(loadedSounds).length > 0 ? `yes, for ${Object.keys(loadedSounds).length} ball types` : 'no');
+    
+    if (ballIndex === undefined) {
+      console.log('[DEBUG BALL SOUND] No ballIndex provided, falling back to default sound');
+      playBounceSound(volume, false);
+      return;
+    }
+    
+    if (!useCustomSounds) {
+      console.log('[DEBUG BALL SOUND] Custom sounds not enabled, falling back to default sound');
+      playBounceSound(volume, false);
+      return;
+    }
+    
+    // Check if we have sounds for this ball
+    if (loadedSounds[ballIndex]?.length > 0) {
       // Get random sound for this ball type
       const ballSounds = loadedSounds[ballIndex];
-      const randomSound = ballSounds[Math.floor(Math.random() * ballSounds.length)];
+      console.log(`[DEBUG BALL SOUND] Found ${ballSounds.length} sounds for ball index ${ballIndex}`);
+      
+      const randomIndex = Math.floor(Math.random() * ballSounds.length);
+      const randomSound = ballSounds[randomIndex];
       
       if (randomSound) {
-        randomSound.volume = Math.min(0.8, volume);
-        randomSound.currentTime = 0;
-        randomSound.play().catch(err => console.log('Sound play error:', err));
+        console.log(`[DEBUG BALL SOUND] Playing sound #${randomIndex} for ball ${ballIndex}`);
+        try {
+          randomSound.volume = Math.min(0.8, volume);
+          randomSound.currentTime = 0;
+          randomSound.play()
+            .then(() => console.log(`[DEBUG BALL SOUND] Sound playback started successfully`))
+            .catch(err => console.log('[DEBUG BALL SOUND] Sound play error:', err));
+        } catch (e) {
+          console.error('[DEBUG BALL SOUND] Error during sound playback:', e);
+          // Fall back to default sound if there's an error
+          playBounceSound(volume, false);
+        }
+      } else {
+        console.log(`[DEBUG BALL SOUND] No valid sound found at index ${randomIndex}, falling back to default`);
+        playBounceSound(volume, false);
       }
     } else {
       // Fall back to default sound
+      console.log(`[DEBUG BALL SOUND] No sounds loaded for ball index ${ballIndex}, falling back to default`);
       playBounceSound(volume, false);
     }
   }, [useCustomSounds, loadedSounds]);
@@ -616,16 +712,41 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     
     let lastTimestamp: number | null = null;
     
+    // Vérifier si MIDI est activé dès le début de l'animation
+    if (midiEnabled) {
+      console.log("MIDI activé dans useEffect initial");
+      // Définir le volume MIDI global
+      setMIDIVolume(midiVolume);
+      
+      // Définir la tonalité MIDI si spécifiée
+      if (midiTonality) {
+        setMIDITonality(midiTonality);
+        console.log(`Tonalité MIDI définie sur ${midiTonality}`);
+      }
+      
+      // Forcer l'initialisation de la séquence par défaut si nécessaire
+      hasMIDISequence();
+    }
+    
     // Version optimisée de la fonction d'animation
     const animate = (timestamp: number) => {
       if (!canvas || !ctx) return;
       
       // Calculer delta time pour des animations plus fluides
-      const deltaTime = lastTimestamp ? Math.min((timestamp - lastTimestamp) / 16.67, 3) : 1;
+      // Limiter deltaTime à 1 (équivalent à 60 FPS) pour éviter les sauts trop grands
+      const deltaTime = lastTimestamp ? Math.min((timestamp - lastTimestamp) / 16.67, 1) : 1;
       lastTimestamp = timestamp;
       
       // Effacer le canvas (utiliser les dimensions d'affichage, pas les dimensions du canvas)
-      ctx.clearRect(0, 0, displayWidth, displayHeight);
+      // Si trail effect est activé, ne pas effacer complètement le canvas pour créer l'effet de traînée
+      if (TRAIL_EFFECT) {
+        // Au lieu d'effacer complètement, dessiner un rectangle semi-transparent
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.1)'; // Opacité réduite pour une traînée plus longue
+        ctx.fillRect(0, 0, displayWidth, displayHeight);
+      } else {
+        // Effacement complet si l'effet de traînée est désactivé
+        ctx.clearRect(0, 0, displayWidth, displayHeight);
+      }
       
       // Dessiner l'arrière-plan
       const bgGradient = ctx.createRadialGradient(
@@ -669,59 +790,95 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
       
       if (timestamp - lastRandomForceTime.current > RANDOM_FORCE_INTERVAL) {
         lastRandomForceTime.current = timestamp;
-        updatedBalls = updatedBalls.map(ball => {
-          // Appliquer une force aléatoire seulement sur 10% des balles pour réduire le chaos
-          if (Math.random() > 0.9) {
-            const angle = Math.random() * Math.PI * 2;
-            const forceX = Math.cos(angle) * RANDOM_FORCE_MAGNITUDE;
-            const forceY = Math.sin(angle) * RANDOM_FORCE_MAGNITUDE;
-            
-            return {
-              ...ball,
-              velocity: {
-                x: ball.velocity.x + forceX,
-                y: ball.velocity.y + forceY
-              }
-            };
-          }
-          return ball;
-        });
+        updatedBalls = applyRandomForce(updatedBalls, timestamp);
       }
       
       // Mettre à jour les positions des balles avec une physique améliorée
       updatedBalls = updatedBalls.map((enhancedBall) => {
         const ball = enhancedBall as EnhancedBall;
         
-        // Appliquer la résistance de l'air (réduite pour conserver l'énergie)
-        let newVx = ball.velocity.x * AIR_RESISTANCE;
-        let newVy = ball.velocity.y * AIR_RESISTANCE;
+        let newVx = ball.velocity.x;
+        let newVy = ball.velocity.y;
         
-        // Appliquer la gravité avec scaling basé sur le deltaTime pour un mouvement plus fluide
-        newVy += (gravity * GRAVITY_SCALING * deltaTime);
-        
-        // MODIFICATION: Appliquer un amortissement minimal pour maintenir l'énergie
-        newVx *= VELOCITY_DAMPING;
-        newVy *= VELOCITY_DAMPING;
-        
-        // NOUVEAU: Vérifier si la balle ralentit et conserver sa vitesse
-        const currentSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
-        const initialSpeed = ball.initialSpeed || Math.sqrt(
-          ball.velocity.x * ball.velocity.x + 
-          ball.velocity.y * ball.velocity.y
-        );
-        
-        // Si la vitesse est trop basse par rapport à la vitesse initiale, l'augmenter
-        if (currentSpeed < initialSpeed * 0.85) {
-          const boostFactor = Math.min(1.1, initialSpeed / currentSpeed * 0.9);
-          newVx *= boostFactor;
-          newVy *= boostFactor;
+        // Appliquer la gravité si activée
+        if (REALISTIC_GRAVITY) {
+          newVy += gravity * GRAVITY_SCALING; // La gravité affecte la vitesse verticale
         }
         
-        // Mettre à jour la position avec le mouvement
-        let newPosition = {
-          x: ball.position.x + (newVx * deltaTime),
-          y: ball.position.y + (newVy * deltaTime)
+        // Appliquer la résistance de l'air / amortissement
+        newVx *= AIR_RESISTANCE;
+        newVy *= AIR_RESISTANCE; // L'air ralentit la balle dans les deux directions
+        
+        // Limiter la vitesse maximale
+        const speedForMaxLimit = Math.sqrt(newVx * newVx + newVy * newVy);
+        if (speedForMaxLimit > MAX_VELOCITY) {
+          const factor = MAX_VELOCITY / speedForMaxLimit;
+          newVx *= factor;
+          newVy *= factor;
+        }
+        
+        // S'assurer que la balle ne s'arrête pas complètement trop vite à cause de la friction (sauf si vitesse quasi nulle)
+        // MAINTENANT: cette logique est un peu plus agressive pour s'assurer qu'elle bouge toujours
+        const speedForMinBoost = Math.sqrt(newVx * newVx + newVy * newVy);
+        if (speedForMinBoost < MIN_VELOCITY && speedForMinBoost > 0.01) {
+           const factor = MIN_VELOCITY / speedForMinBoost;
+           newVx *= factor;
+           newVy *= factor;
+        }
+        
+        // Mettre à jour la position
+        let newBallPosition = {
+          x: ball.position.x + newVx,
+          y: ball.position.y + newVy
         };
+        
+        // Maintenir la vitesse minimale pour éviter que la balle ralentisse trop
+        // mais seulement pour le mouvement horizontal, pour permettre à la gravité d'agir
+        const currentBallSpeedForMin = Math.sqrt(newVx * newVx + newVy * newVy);
+        if (currentBallSpeedForMin < MIN_VELOCITY && currentBallSpeedForMin > 0) {
+          const boostFactor = MIN_VELOCITY / currentBallSpeedForMin;
+          // Appliquer le boost uniquement si MAINTAIN_CONSTANT_SPEED est faux, pour permettre la gravité
+          if (!MAINTAIN_CONSTANT_SPEED) {
+             newVx *= boostFactor; // Cela affectait la gravité, à revoir
+          }
+        }
+        
+        // Détection préventive de collision avec les murs
+        // Si la balle est trop proche d'un mur et se dirige vers lui, on change sa direction
+        const wallBounds = canvas.getBoundingClientRect();
+        const wallWidth = wallBounds.width;
+        const wallHeight = wallBounds.height;
+        const safeDistance = ball.radius + 5; // Distance de sécurité
+        
+        // Vérifier les murs horizontaux
+        if (newBallPosition.x - ball.radius < safeDistance && newVx < 0) {
+          // Trop proche du mur gauche et se dirige vers lui
+          handleWallCollision(ball, wallWidth, wallHeight, bounceVolume);
+          newVx = ball.velocity.x;
+          newVy = ball.velocity.y;
+          newBallPosition.x = ball.position.x;
+        } else if (newBallPosition.x + ball.radius > wallWidth - safeDistance && newVx > 0) {
+          // Trop proche du mur droit et se dirige vers lui
+          handleWallCollision(ball, wallWidth, wallHeight, bounceVolume);
+          newVx = ball.velocity.x;
+          newVy = ball.velocity.y;
+          newBallPosition.x = ball.position.x;
+        }
+        
+        // Vérifier les murs verticaux
+        if (newBallPosition.y - ball.radius < safeDistance && newVy < 0) {
+          // Trop proche du plafond et se dirige vers lui
+          handleWallCollision(ball, wallWidth, wallHeight, bounceVolume);
+          newVx = ball.velocity.x;
+          newVy = ball.velocity.y;
+          newBallPosition.y = ball.position.y;
+        } else if (newBallPosition.y + ball.radius > wallHeight - safeDistance && newVy > 0) {
+          // Trop proche du sol et se dirige vers lui
+          handleWallCollision(ball, wallWidth, wallHeight, bounceVolume);
+          newVx = ball.velocity.x;
+          newVy = ball.velocity.y;
+          newBallPosition.y = ball.position.y;
+        }
         
         // Effets visuels
         let newPulseEffect = ball.pulseEffect ? ball.pulseEffect * 0.9 : 0;
@@ -733,10 +890,68 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
         let lastCollisionTime = ball.lastCollisionTime || 0;
         let currentScoreIncrement = 0;
         
+        // DÉTECTER LES COLLISIONS AVEC LES MURS DU CANVAS
+        const canvasBounds = canvas.getBoundingClientRect();
+        const canvasWidth = canvasBounds.width;
+        const canvasHeight = canvasBounds.height;
+        
+        // Vérifier la collision avec le mur droit
+        if (newBallPosition.x + ball.radius > canvasWidth) {
+          console.log(`[WALL-RIGHT] Collision détectée! Rayon avant: ${ball.radius.toFixed(2)}`);
+          handleWallCollision(ball, canvasWidth, canvasHeight, bounceVolume);
+          
+          // IMPORTANT: Ces ajustements sont maintenant gérés dans handleWallCollision
+          // La fonction handleWallCollision met à jour correctement:
+          // - la position de la balle pour éviter les problèmes de pénétration
+          // - la vitesse de la balle (rebond)
+          // - le rayon de la balle (croissance)
+          // - les sons et effets visuels
+          
+          // Mise à jour de la vitesse et position après la gestion de collision
+          newVx = ball.velocity.x;
+          newBallPosition.x = ball.position.x;
+          
+          // Log de vérification
+          console.log(`[WALL-RIGHT] Après collision, nouveau rayon: ${ball.radius.toFixed(2)}`);
+        }
+        // Vérifier la collision avec le mur gauche
+        else if (newBallPosition.x - ball.radius < 0) {
+          console.log(`[WALL-LEFT] Collision détectée! Rayon avant: ${ball.radius.toFixed(2)}`);
+          handleWallCollision(ball, canvasWidth, canvasHeight, bounceVolume);
+          
+          // Mise à jour de la vitesse et position après la gestion de collision
+          newVx = ball.velocity.x;
+          newBallPosition.x = ball.position.x;
+          
+          console.log(`[WALL-LEFT] Après collision, nouveau rayon: ${ball.radius.toFixed(2)}`);
+        }
+        // Vérifier la collision avec le sol
+        else if (newBallPosition.y + ball.radius > canvasHeight) {
+          console.log(`[WALL-FLOOR] Collision détectée! Rayon avant: ${ball.radius.toFixed(2)}`);
+          handleWallCollision(ball, canvasWidth, canvasHeight, bounceVolume);
+          
+          // Mise à jour de la vitesse et position après la gestion de collision
+          newVy = ball.velocity.y;
+          newBallPosition.y = ball.position.y;
+          
+          console.log(`[WALL-FLOOR] Après collision, nouveau rayon: ${ball.radius.toFixed(2)}`);
+        }
+        // Vérifier la collision avec le plafond
+        else if (newBallPosition.y - ball.radius < 0) {
+          console.log(`[WALL-CEILING] Collision détectée! Rayon avant: ${ball.radius.toFixed(2)}`);
+          handleWallCollision(ball, canvasWidth, canvasHeight, bounceVolume);
+          
+          // Mise à jour de la vitesse et position après la gestion de collision
+          newVy = ball.velocity.y;
+          newBallPosition.y = ball.position.y;
+          
+          console.log(`[WALL-CEILING] Après collision, nouveau rayon: ${ball.radius.toFixed(2)}`);
+        }
+        
         // Détection de collision avec les limites du cercle avec un délai
         const distanceFromCenter = Math.sqrt(
-          Math.pow(newPosition.x - centerX, 2) + 
-          Math.pow(newPosition.y - centerY, 2)
+          Math.pow(newBallPosition.x - centerX, 2) + 
+          Math.pow(newBallPosition.y - centerY, 2)
         );
         
         const isColliding = distanceFromCenter + ball.radius >= circleRadius - WALL_PADDING;
@@ -747,7 +962,7 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
           // Utiliser la fonction handleCollision pour une physique plus stable
           const collisionResult = handleCollision(
             ball,
-            newPosition,
+            newBallPosition,
             newVx,
             newVy,
             centerX,
@@ -756,26 +971,36 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
             timestamp
           );
           
-          newPosition = collisionResult.position;
+          newBallPosition = collisionResult.position;
           newVx = collisionResult.velocity.x;
           newVy = collisionResult.velocity.y;
           lastCollisionTime = collisionResult.lastCollisionTime;
           
           // Effets sonores et visuels lors de la collision
+          // DECOUPLED: First calculate shared values needed for both sound and visual effects
+          const impactSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
+          const volume = Math.min(1.0, impactSpeed / 10) * bounceVolume;
+          
+          // SOUND EFFECTS: Now completely independent from visual effects
+          // First play the grow sound - ensure it always plays regardless of custom images
+          console.log(`[DEBUG COLLISION] Playing grow sound with radius=${ball.radius}, useCustomSounds=${useCustomSounds}`);
+          playGrowSound(ball.radius / 50 * bounceVolume, useCustomSounds);
+          
+          // Then play specific sound for the ball if available
+          if (useCustomSounds && ball.imageIndex !== undefined) {
+            console.log(`[DEBUG COLLISION] Playing ball-specific sound for imageIndex=${ball.imageIndex}`);
+            playBallSpecificSound(volume, ball.imageIndex);
+          } else if (standardSoundsEnabled) {
+            console.log(`[DEBUG COLLISION] Playing standard bounce sound`);
+            playBounceSound(volume, useCustomSounds);
+          }
+          
+          // VISUAL EFFECTS: Only applied if effects are enabled
+          let newPulseEffect = 0;
+          let newGlowSize = 1.5;
+          let newGlowOpacity = 0.7;
+          
           if (effectsEnabled) {
-            if (standardSoundsEnabled) {
-              playGrowSound(ball.radius / 50 * bounceVolume, useCustomSounds);
-            }
-            
-            const impactSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
-            const volume = Math.min(1.0, impactSpeed / 10) * bounceVolume;
-            
-            if (useCustomSounds && ball.imageIndex !== undefined) {
-              playBallSpecificSound(volume, ball.imageIndex);
-            } else if (standardSoundsEnabled) {
-              playBounceSound(volume, useCustomSounds);
-            }
-            
             newPulseEffect = Math.min(1.0, impactSpeed / 10);
             newGlowSize = 2.0 + (impactSpeed * 0.05);
             newGlowOpacity = Math.min(0.9, 0.7 + (impactSpeed * 0.02));
@@ -803,22 +1028,22 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
           }
           
           // Gestion des sons musicaux
-            if (musicEnabled && effectsEnabled) {
-            const impactSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
-            const volume = Math.min(1.0, impactSpeed / 10) * bounceVolume;
-            
-            if (ball.musicScale && ball.id) {
-              if (ball.imageIndex !== undefined && ballMusicAssignments[ball.imageIndex]) {
-                setBallMusicScale(ball.id, ballMusicAssignments[ball.imageIndex]);
-              } else if (!ball.musicScale) {
-                setBallMusicScale(ball.id, ball.musicScale);
-              }
+            if (musicEnabled) {  // Removed dependency on effectsEnabled
+              const impactSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
+              const volume = Math.min(1.0, impactSpeed / 10) * bounceVolume;
               
-              playBallMusicNote(ball.id, volume, impactSpeed);
+              if (ball.musicScale && ball.id) {
+                if (ball.imageIndex !== undefined && ballMusicAssignments[ball.imageIndex]) {
+                  setBallMusicScale(ball.id, ballMusicAssignments[ball.imageIndex]);
+                } else if (!ball.musicScale) {
+                  setBallMusicScale(ball.id, ball.musicScale);
+                }
+                
+                playBallMusicNote(ball.id, volume, impactSpeed);
+              }
             }
-          }
-          
-          // Sons progressifs
+            
+            // Sons progressifs
             if (progressiveSoundEnabled && onBallCollision) {
             const impactSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
             const volume = Math.min(1.0, impactSpeed / 10) * bounceVolume;
@@ -834,7 +1059,7 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
             
             return {
             ...ball,
-              position: newPosition,
+              position: newBallPosition,
               velocity: { x: newVx, y: newVy },
               pulseEffect: effectsEnabled ? newPulseEffect : 0,
               glowSize: effectsEnabled ? newGlowSize : 1,
@@ -845,10 +1070,10 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
           } else if (isColliding) {
           // Si nous sommes en collision mais que le délai n'est pas écoulé,
           // corriger simplement la position pour éviter la pénétration
-            const angle = Math.atan2(newPosition.y - centerY, newPosition.x - centerX);
+            const angle = Math.atan2(newBallPosition.y - centerY, newBallPosition.x - centerX);
           const correctedRadius = circleRadius - ball.radius - WALL_PADDING;
             
-            newPosition = {
+            newBallPosition = {
               x: centerX + Math.cos(angle) * correctedRadius,
               y: centerY + Math.sin(angle) * correctedRadius
             };
@@ -859,9 +1084,17 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
             ? ball.rotation + (ball.angularVelocity || 0) * deltaTime 
             : 0;
           
+          // NOUVEAU: Ajouter une limite de vitesse pour empêcher les balles de devenir trop rapides
+          const currentSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
+          if (currentSpeed > MAX_VELOCITY) {
+            const reductionFactor = MAX_VELOCITY / currentSpeed;
+            newVx *= reductionFactor;
+            newVy *= reductionFactor;
+          }
+          
           return {
           ...ball,
-            position: newPosition,
+            position: newBallPosition,
             velocity: { x: newVx, y: newVy },
             pulseEffect: effectsEnabled ? newPulseEffect : 0,
             glowSize: effectsEnabled ? newGlowSize : 1,
@@ -869,7 +1102,7 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
             score: newScore,
             lastCollisionTime,
             rotation: newRotation,
-            initialSpeed: ball.initialSpeed || initialSpeed  // Stocker la vitesse initiale pour référence
+            initialSpeed: ball.initialSpeed  // Garder la vitesse initiale pour référence
         };
       });
       
@@ -896,9 +1129,9 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
         updatedBalls.forEach(ball => {
           const enhancedBall = ball as EnhancedBall;
           
-        // Dessiner l'effet de lueur si activé
+          // Draw glow effect if enabled
           if (effectsEnabled) {
-          // Extraire les valeurs HSL de la couleur
+          // Extract HSL values from color
             const colorMatch = enhancedBall.color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
             let hue = 0, saturation = 70, lightness = 80;
             
@@ -908,7 +1141,7 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
               lightness = parseInt(colorMatch[3]);
             }
           
-          // Créer un dégradé pour l'effet de lueur
+          // Create gradient for glow effect
           const glowSize = enhancedBall.glowSize || 1.5;
           const glowOpacity = enhancedBall.glowOpacity || 0.7;
           
@@ -933,6 +1166,58 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
             ctx.fill();
           }
           
+        // Si l'effet de trainée est activé, dessiner une petite trainée derrière la balle
+        if (TRAIL_EFFECT && enhancedBall.velocity) {
+          const speed = Math.sqrt(
+            enhancedBall.velocity.x * enhancedBall.velocity.x + 
+            enhancedBall.velocity.y * enhancedBall.velocity.y
+          );
+          
+          // Calculer la longueur de la trainée en fonction de la vitesse
+          const trailLength = Math.min(speed * 3, 60); // Trainée plus longue pour mieux visualiser
+          
+          // Calculer la direction inverse de la vitesse pour dessiner la trainée
+          const vNorm = Math.sqrt(
+            enhancedBall.velocity.x * enhancedBall.velocity.x + 
+            enhancedBall.velocity.y * enhancedBall.velocity.y
+          );
+          
+          if (vNorm > 0.1) {  // Éviter division par zéro
+            const vxNorm = -enhancedBall.velocity.x / vNorm;
+            const vyNorm = -enhancedBall.velocity.y / vNorm;
+            
+            // Dessiner la trainée
+            ctx.beginPath();
+            ctx.moveTo(enhancedBall.position.x, enhancedBall.position.y);
+            ctx.lineTo(
+              enhancedBall.position.x + vxNorm * trailLength,
+              enhancedBall.position.y + vyNorm * trailLength
+            );
+            
+            // Créer un dégradé pour la trainée
+            const gradient = ctx.createLinearGradient(
+              enhancedBall.position.x, enhancedBall.position.y,
+              enhancedBall.position.x + vxNorm * trailLength,
+              enhancedBall.position.y + vyNorm * trailLength
+            );
+            
+            // Rendre la trainée plus visible
+            let color = enhancedBall.color;
+            if (color.startsWith('hsl')) {
+              gradient.addColorStop(0, color.replace(')', ', 0.9)').replace('hsl', 'hsla'));
+              gradient.addColorStop(1, color.replace(')', ', 0)').replace('hsl', 'hsla'));
+            } else {
+              gradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+              gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            }
+            
+            ctx.strokeStyle = gradient;
+            ctx.lineWidth = enhancedBall.radius * 0.6; // Légèrement plus fine
+            ctx.lineCap = 'round';
+            ctx.stroke();
+          }
+        }
+          
         // Dessiner la balle
         const pulseEffect = enhancedBall.pulseEffect || 0;
           const pulseScale = effectsEnabled ? (1 + (pulseEffect * 0.2)) : 1;
@@ -956,11 +1241,11 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
           if (useCustomImages && enhancedBall.image) {
             ctx.clip();
             const imgSize = enhancedBall.radius * 2 * pulseScale;
-          
+        
           // Activer l'interpolation pour une meilleure qualité d'image
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'high';
-          
+        
             ctx.drawImage(
               enhancedBall.image, 
               enhancedBall.position.x - imgSize/2, 
@@ -1010,11 +1295,11 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
           if (scoreTrackingEnabled && enhancedBall.score) {
           // Calculer la taille de police optimale basée sur le rayon
           const fontSize = Math.max(14, Math.min(enhancedBall.radius/2, 24));
-          
+        
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
           ctx.font = `bold ${fontSize}px Arial, sans-serif`;
-          
+        
           // Ajouter un contour noir pour améliorer la lisibilité
           ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
           ctx.lineWidth = 3;
@@ -1023,7 +1308,7 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
             enhancedBall.position.x, 
             enhancedBall.position.y
           );
-          
+        
             ctx.fillStyle = 'white';
             ctx.fillText(
               enhancedBall.score.toString(), 
@@ -1087,9 +1372,25 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
       const container = canvas.parentElement;
       if (!container) return;
       
-      // Obtenir la taille du conteneur
-      const containerWidth = container.clientWidth;
-      const containerHeight = container.clientHeight;
+      // Pour TikTok, nous voulons un ratio 9:16 (portrait)
+      const tiktokRatio = 9/16;
+      
+      // Calculer la taille maximale disponible
+      const maxWidth = container.clientWidth;
+      const maxHeight = window.innerHeight * 0.8; // Utiliser 80% de la hauteur de la fenêtre
+      
+      let containerWidth, containerHeight;
+      
+      // Déterminer si nous sommes limités par la largeur ou la hauteur
+      if (maxWidth / maxHeight > tiktokRatio) {
+        // Limité par la hauteur, ajuster la largeur
+        containerHeight = maxHeight;
+        containerWidth = maxHeight * tiktokRatio;
+      } else {
+        // Limité par la largeur, ajuster la hauteur
+        containerWidth = maxWidth;
+        containerHeight = maxWidth / tiktokRatio;
+      }
       
       // Appliquer un facteur de pixel ratio pour les écrans haute densité
       const pixelRatio = window.devicePixelRatio || 1;
@@ -1098,7 +1399,7 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
       canvas.width = containerWidth * pixelRatio;
       canvas.height = containerHeight * pixelRatio;
       
-      // Maintenir la taille d'affichage (CSS) comme avant
+      // Maintenir la taille d'affichage (CSS)
       canvas.style.width = `${containerWidth}px`;
       canvas.style.height = `${containerHeight}px`;
       
@@ -1113,6 +1414,8 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
       }
+      
+      console.log(`Canvas resized to TikTok format: ${containerWidth}x${containerHeight} (ratio: ${containerWidth/containerHeight})`);
     };
     
     // Appliquer le redimensionnement immédiatement
@@ -1233,7 +1536,7 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     }, 50);
   };
 
-  // Améliorer le traitement des collisions sans changer les constantes de base
+  // Améliorer le traitement des collisions pour maintenir la vitesse constante
   const handleCollision = (
     ball: EnhancedBall,
     newPosition: { x: number, y: number },
@@ -1244,468 +1547,475 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     circleRadius: number,
     timestamp: number
   ) => {
-    // Calculer l'angle d'impact
-    const angle = Math.atan2(newPosition.y - centerY, newPosition.x - centerX);
+    console.log(`[COLLISION] Collision avec cercle, radius avant: ${ball.radius.toFixed(2)}, midiEnabled: ${midiEnabled}`);
     
-    // Corriger la position pour éviter le chevauchement avec la limite
-    const correctedRadius = circleRadius - ball.radius - WALL_PADDING;
-    const correctedPosition = {
-      x: centerX + Math.cos(angle) * correctedRadius,
-      y: centerY + Math.sin(angle) * correctedRadius
-    };
+    // Stocker la vitesse avant collision pour la maintenir après
+    const speedBeforeCollision = Math.sqrt(newVx * newVx + newVy * newVy);
+    const initialSpeed = ball.initialSpeed || speedBeforeCollision;
     
-    // Vecteur normal à la surface d'impact (pointant vers l'intérieur)
-    const nx = -Math.cos(angle);
-    const ny = -Math.sin(angle);
-    
-    // Calculer la vitesse d'impact
-    const impactSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
-    
-    // Calculer l'angle d'incidence (0 = perpendiculaire, 1 = tangentiel)
-    const dotProduct = newVx * nx + newVy * ny;
-    const incidenceAngle = Math.abs(dotProduct) / impactSpeed;
-    
-    // Appliquer une friction plus faible pour les impacts rasants
-    const grazingFriction = 1 - (0.02 * (1 - incidenceAngle)); // MODIFIÉ: Moins de perte par friction
-    
-    // MODIFICATION: Augmenter l'énergie conservée pour des rebonds plus dynamiques
-    // Conservation presque parfaite de l'énergie + un léger boost pour compenser d'autres pertes
-    const bouncinessBoost = 1.0 + (bounciness * 0.3); // Jusqu'à 30% d'énergie supplémentaire
-    const energyRetained = Math.min(1.05, bounciness * grazingFriction * bouncinessBoost);
-    
-    // Calculer les nouvelles composantes de vitesse avec l'énergie accrue
-    const newVelocityX = (newVx - 2 * dotProduct * nx) * energyRetained;
-    const newVelocityY = (newVy - 2 * dotProduct * ny) * energyRetained;
-    
-    // NOUVEAU: Conserver la norme de la vitesse initiale
-    const initialSpeed = ball.initialSpeed || impactSpeed;
-    const newSpeed = Math.sqrt(newVelocityX * newVelocityX + newVelocityY * newVelocityY);
-    
-    // Si la nouvelle vitesse est trop basse, la booster vers la vitesse initiale
-    let finalVx = newVelocityX;
-    let finalVy = newVelocityY;
-    
-    if (newSpeed < initialSpeed * 0.95) {
-      const velocityBoost = Math.min(1.05, initialSpeed / newSpeed * 0.95);
-      finalVx *= velocityBoost;
-      finalVy *= velocityBoost;
-    }
-    
-    // Jouer une note MIDI lors de la collision avec le mur circulaire
-    if (midiEnabled && hasMIDISequence()) {
-      // Force l'appel MIDI directement ici pour s'assurer qu'il est déclenché
-      const midiVolumeAdjusted = Math.min(1.0, Math.max(0.4, impactSpeed / 8)) * (midiVolume || 0.7);
-      // Déclencher immédiatement la note MIDI
-      playMIDINote(midiVolumeAdjusted);
-      
-      // Pour les collisions plus fortes, jouer une note supplémentaire
-      if (impactSpeed > 4) {
-        setTimeout(() => {
-          playMIDINote(midiVolumeAdjusted * 0.7);
-        }, 100);
+    // Jouer une note MIDI au début de la collision si c'est activé ET qu'une séquence MIDI est disponible
+    if (midiEnabled && typeof playMIDINote === 'function' && hasMIDISequence()) {
+      try {
+        // Calculer la vitesse d'impact
+        const speed = Math.sqrt(newVx * newVx + newVy * newVy);
+        // Calculer un volume entre 0.4 et 1 en fonction de la vitesse
+        const volume = 0.4 + Math.min(0.6, speed / 20);
+        
+        console.log(`[COLLISION] Tentative de jouer un son MIDI volume=${volume}`);
+        playMIDINote(volume);
+      } catch (e) {
+        console.error("[COLLISION] Erreur lecture MIDI:", e);
       }
     }
     
+    // *** IMPORTANT *** AUGMENTER LA TAILLE DE LA BALLE À CHAQUE REBOND
+    // Limiter la taille presque jusqu'à la taille du cercle pour éviter les chevauchements
+    const maxBallRadius = circleRadius * MAX_BALL_RADIUS_FACTOR;
+    const growthFactor = growthRate * 0.5; // Facteur de croissance plus petit
+    const newRadius = Math.min(ball.radius + growthFactor, maxBallRadius);
+    
+    console.log(`[COLLISION] Augmentation du rayon: ${ball.radius.toFixed(2)} -> ${newRadius.toFixed(2)}, facteur: ${growthFactor.toFixed(2)}, max: ${maxBallRadius.toFixed(2)}`);
+    
+    // Mettre à jour le rayon de la balle
+    ball.radius = newRadius;
+    
+    // Calculer la direction normale et l'angle d'incidence
+    const dx = newPosition.x - centerX;
+    const dy = newPosition.y - centerY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    // Normaliser le vecteur de direction
+    const nx = dx / distance;
+    const ny = dy / distance;
+    
+    // Calculer la projection du vecteur vitesse sur la normale
+    const dotProduct = newVx * nx + newVy * ny;
+    
+    // Calculer l'impulsion (changement de vitesse)
+    const impactSpeed = Math.abs(dotProduct);
+    
+    // Calculer la nouvelle vitesse en fonction de l'élasticité
+    const elasticity = ball.elasticity || bounciness;
+    
+    // Réfléchir la composante normale de la vitesse et conserver l'énergie
+    const reflectionX = nx * dotProduct * (1 + elasticity);
+    const reflectionY = ny * dotProduct * (1 + elasticity);
+    
+    // Appliquer le rebond
+    newVx -= reflectionX;
+    newVy -= reflectionY;
+    
+    // Repositionner la balle exactement à la limite du cercle pour éviter les téléportations
+    if (SMOOTH_COLLISIONS) {
+      const newDistance = circleRadius - ball.radius;
+      newPosition.x = centerX + nx * newDistance;
+      newPosition.y = centerY + ny * newDistance;
+    } else {
+      // Repositionner la balle à la limite du cercle pour éviter la pénétration
+      const overlapDistance = (ball.radius + circleRadius - distance) - WALL_PADDING;
+      newPosition.x -= nx * overlapDistance * 1.01; // Petit décalage supplémentaire
+      newPosition.y -= ny * overlapDistance * 1.01;
+    }
+    
+    // Jouer un son pour la collision
+    if (standardSoundsEnabled) {
+      playBounceSound(Math.min(impactSpeed / 20, 1));
+    }
+    
+    // IMPORTANT: Maintenir une vitesse constante après la collision
+    if (MAINTAIN_CONSTANT_SPEED && ball.initialSpeed && ball.initialSpeed > 0) {
+      const speedAfterCollision = Math.sqrt(ball.velocity.x * ball.velocity.x + ball.velocity.y * ball.velocity.y);
+      if (speedAfterCollision > 0 && Math.abs(speedAfterCollision - ball.initialSpeed) > 0.01) {
+        const correctionFactor = ball.initialSpeed / speedAfterCollision;
+        ball.velocity.x *= correctionFactor;
+        ball.velocity.y *= correctionFactor;
+      }
+    }
+    
+    // Mise à jour du temps de dernière collision
+    const lastCollisionTime = timestamp;
+    
+    console.log(`[COLLISION] Collision terminée, nouveau rayon: ${ball.radius.toFixed(2)}`);
+    
+    // Retourner les valeurs mises à jour
     return {
-      position: correctedPosition,
-      velocity: { x: finalVx, y: finalVy },
-      lastCollisionTime: timestamp
+      position: newPosition,
+      velocity: { x: newVx, y: newVy },
+      lastCollisionTime
     };
   };
 
   // Améliorer la gestion des collisions avec les murs
-  const handleWallCollision = (ball: Ball, canvasWidth: number, canvasHeight: number, bounceVolume: number) => {
-    let collision = false;
-    let collisionIntensity = 0;
-    let wallType = ''; // Pour identifier quel mur a été touché
+  const handleWallCollision = (
+    ball: EnhancedBall,
+    canvasWidth: number,
+    canvasHeight: number,
+    bounceVolume: number // This is the game-wide bounceVolume prop
+  ) => {
+    const currentTime = performance.now();
     
-    // Stocker la vitesse initiale pour référence si elle n'existe pas déjà
-    const initialSpeed = (ball as EnhancedBall).initialSpeed || Math.sqrt(
-      ball.velocity.x * ball.velocity.x + ball.velocity.y * ball.velocity.y
-    );
-    (ball as EnhancedBall).initialSpeed = initialSpeed;
+    // DEBUG: Afficher les informations détaillées à chaque appel
+    console.log(`[DEBUG COLLISION] handleWallCollision called with ball id=${ball.id}, radius=${ball.radius.toFixed(2)}, position=(${ball.position.x.toFixed(2)}, ${ball.position.y.toFixed(2)})`);
+    console.log(`[DEBUG COLLISION] ball velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)}), currentTime=${currentTime}`);
+    console.log(`[DEBUG COLLISION] lastWallCollisionTime=${ball.lastWallCollisionTime || 'undefined'}, immunity time=${WALL_IMMUNITY_TIME}ms`);
     
-    // Collision avec le mur droit
-    if (ball.position.x + ball.radius > canvasWidth) {
-      // Corriger la position pour éviter l'interpénétration
-      ball.position.x = canvasWidth - ball.radius;
+    // DEBUG: Afficher l'état actuel des sons personnalisés
+    console.log('[DEBUG SOUND] useCustomSounds:', useCustomSounds);
+    console.log('[DEBUG SOUND] hasCustomSound("wall"):', hasCustomSound('wall'));
+    console.log('[DEBUG SOUND] standardSoundsEnabled:', standardSoundsEnabled);
+    
+    // Vérifier si nous devons mettre à jour la physique, mais toujours jouer les sons
+    let shouldUpdatePhysics = true;
+    if (ball.lastWallCollisionTime && currentTime - ball.lastWallCollisionTime < WALL_IMMUNITY_TIME) {
+      shouldUpdatePhysics = false;
+      console.log(`[DEBUG COLLISION] Collision physics immunity active for ${Math.round(WALL_IMMUNITY_TIME - (currentTime - ball.lastWallCollisionTime))}ms more`);
+    }
+
+    // Use the component's bounciness prop, which defaults to DEFAULT_BOUNCINESS
+    const currentBounciness = bounciness;
+
+    let wall: "right" | "left" | "floor" | "ceiling" | null = null; // track which wall
+    const initialSpeed = Math.sqrt(ball.velocity.x * ball.velocity.x + ball.velocity.y * ball.velocity.y);
+    console.log(`[DEBUG COLLISION] Initial speed: ${initialSpeed.toFixed(2)}, currentBounciness: ${currentBounciness}`);
+
+    const addRandomAngle = (vx: number, vy: number): {x: number, y: number} => {
+      if (!RANDOM_BOUNCE_ANGLE) return {x: vx, y: vy};
+      const angle = Math.atan2(vy, vx);
+      const randomVariation = (Math.random() * 2 - 1) * RANDOM_ANGLE_MAX;
+      const newAngle = angle + randomVariation;
+      const speed = Math.sqrt(vx * vx + vy * vy);
+      console.log(`[DEBUG COLLISION] Random angle applied: ${(randomVariation * 180 / Math.PI).toFixed(2)} degrees`);
+      return { x: Math.cos(newAngle) * speed, y: Math.sin(newAngle) * speed };
+    };
+    
+    let collided = false;
+
+    // Check for collision and reflect velocity
+    // Ensure position is corrected to prevent sticking
+    if (ball.position.x + ball.radius > canvasWidth - WALL_MARGIN) {
+      wall = "right";
+      console.log(`[DEBUG COLLISION] Right wall collision detected`);
       
-      // MODIFICATION: Conservation presque parfaite de l'énergie
-      const speedSqr = ball.velocity.x * ball.velocity.x;
-      const boostFactor = 1.0 + (bounciness * 0.25); // Jusqu'à 25% d'énergie supplémentaire
-      const energyRetained = Math.min(1.05, (bounciness - 0.01 * (speedSqr / 100)) * boostFactor);
-      
-      // Inverser la vitesse horizontale avec moins de perte d'énergie
-      ball.velocity.x = -ball.velocity.x * energyRetained;
-      
-      // Ajouter une légère poussée aléatoire pour éviter les mouvements trop linéaires
-      if (Math.abs(ball.velocity.y) < 1.0) {
-        ball.velocity.y += (Math.random() - 0.3) * 0.7 * bounciness; // Plus de poussée vers le haut
+      if (shouldUpdatePhysics) {
+        console.log(`[DEBUG COLLISION] Updating physics for right wall collision`);
+        // Corriger la position pour un contact exact avec le mur
+        ball.position.x = canvasWidth - ball.radius - WALL_MARGIN;
+        // Inverser la vélocité X avec un peu d'atténuation contrôlée par le bounciness
+        ball.velocity.x = -Math.abs(ball.velocity.x) * currentBounciness;
+        // Appliquer une friction à la vélocité Y pour simuler une friction au mur
+        ball.velocity.y *= WALL_TANGENTIAL_FRICTION;
+        console.log(`[DEBUG COLLISION] After right wall: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
       } else {
-        ball.velocity.y += (Math.random() - 0.5) * 0.2;
+        console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
       }
       
-      collision = true;
-      collisionIntensity = Math.abs(ball.velocity.x);
-      wallType = 'right';
+      collided = true;
+    } else if (ball.position.x - ball.radius < WALL_MARGIN) {
+      wall = "left";
+      console.log(`[DEBUG COLLISION] Left wall collision detected`);
       
-      // Jouer MIDI lorsque la balle touche un mur
-      if (midiEnabled && hasMIDISequence()) {
-        // Forcer l'appel MIDI ici aussi pour les collisions avec les murs
-        const midiVolumeAdjusted = Math.min(1.0, Math.max(0.4, collisionIntensity / 8)) * (midiVolume || 0.7);
-        playMIDINote(midiVolumeAdjusted);
-      }
-    }
-    
-    // Collision avec le mur gauche
-    if (ball.position.x - ball.radius < 0) {
-      // Corriger la position
-      ball.position.x = ball.radius;
-      
-      // MODIFICATION: Conservation presque parfaite de l'énergie
-      const speedSqr = ball.velocity.x * ball.velocity.x;
-      const boostFactor = 1.0 + (bounciness * 0.25);
-      const energyRetained = Math.min(1.05, (bounciness - 0.01 * (speedSqr / 100)) * boostFactor);
-      
-      // Inverser la vitesse horizontale avec moins de perte d'énergie
-      ball.velocity.x = -ball.velocity.x * energyRetained;
-      
-      // Ajouter une légère poussée aléatoire
-      if (Math.abs(ball.velocity.y) < 1.0) {
-        ball.velocity.y += (Math.random() - 0.3) * 0.7 * bounciness; // Plus de poussée vers le haut
+      if (shouldUpdatePhysics) {
+        // Corriger la position pour un contact exact avec le mur
+        ball.position.x = ball.radius + WALL_MARGIN;
+        // Inverser la vélocité X avec un peu d'atténuation
+        ball.velocity.x = Math.abs(ball.velocity.x) * currentBounciness;
+        // Appliquer une friction à la vélocité Y
+        ball.velocity.y *= WALL_TANGENTIAL_FRICTION;
+        console.log(`[DEBUG COLLISION] After left wall: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
       } else {
-        ball.velocity.y += (Math.random() - 0.5) * 0.2;
+        console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
       }
       
-      collision = true;
-      collisionIntensity = Math.abs(ball.velocity.x);
-      wallType = 'left';
-      
-      // Jouer MIDI pour le mur gauche aussi
-      if (midiEnabled && hasMIDISequence()) {
-        const midiVolumeAdjusted = Math.min(1.0, Math.max(0.4, collisionIntensity / 8)) * (midiVolume || 0.7);
-        playMIDINote(midiVolumeAdjusted);
-      }
+      collided = true;
     }
-    
-    // Collision avec le sol
-    if (ball.position.y + ball.radius > canvasHeight) {
-      // Corriger la position
-      ball.position.y = canvasHeight - ball.radius;
+
+    // Traitement spécial pour le sol - essentiel pour fixer le glitch
+    if (ball.position.y + ball.radius > canvasHeight - WALL_MARGIN) {
+      wall = "floor";
       
-      // Rebond au sol avec plus d'absorption d'énergie et friction accrue
-      // Seulement rebondir si la vitesse est significative
-      if (Math.abs(ball.velocity.y) > 0.3) {
-        // MODIFICATION: Boost similaire mais un peu plus faible pour le sol
-        const speedSqr = ball.velocity.y * ball.velocity.y;
-        const boostFactor = 1.0 + (bounciness * 0.2); // 20% d'énergie supplémentaire
-        const energyRetained = Math.min(1.15, (bounciness - 0.05 * (speedSqr / 100)) * boostFactor);
+      if (shouldUpdatePhysics) {
+        // IMPORTANT: S'assurer que la balle est exactement sur le sol
+        ball.position.y = canvasHeight - ball.radius - WALL_MARGIN;
         
-        ball.velocity.y = -ball.velocity.y * energyRetained;
+        // Force minimale pour éviter que la balle "colle" au sol
+        const minBounceVelocity = 1.0;
         
-        // Appliquer une friction horizontale réduite pour maintenir le mouvement
-        ball.velocity.x *= (1 - (DEFAULT_FRICTION * 0.8));
+        // Si la vitesse est trop faible, ajouter une impulsion minimale
+        if (Math.abs(ball.velocity.y) < minBounceVelocity) {
+          ball.velocity.y = -minBounceVelocity;
+        } else {
+          // Sinon, rebond normal avec atténuation contrôlée
+          ball.velocity.y = -Math.abs(ball.velocity.y) * currentBounciness;
+        }
         
-        collision = true;
-        collisionIntensity = Math.abs(ball.velocity.y);
-        wallType = 'floor';
+        // Appliquer une friction horizontale plus importante au sol
+        ball.velocity.x *= DEFAULT_FRICTION;
+        console.log(`[DEBUG COLLISION] After floor: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
+      } else {
+        console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
+      }
+      
+      collided = true;
+    } else if (ball.position.y - ball.radius < WALL_MARGIN) {
+      wall = "ceiling";
+      
+      if (shouldUpdatePhysics) {
+        // Corriger la position pour un contact exact avec le plafond
+        ball.position.y = ball.radius + WALL_MARGIN;
+        // Inverser la vélocité Y avec atténuation
+        ball.velocity.y = Math.abs(ball.velocity.y) * currentBounciness;
+        // Appliquer une friction à la vélocité X
+        ball.velocity.x *= WALL_TANGENTIAL_FRICTION;
+        console.log(`[DEBUG COLLISION] After ceiling: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
+      } else {
+        console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
+      }
+      
+      collided = true;
+    }
+
+    if (collided && wall) {
+      // Mettre à jour le temps de collision uniquement si nous mettons à jour la physique
+      if (shouldUpdatePhysics) {
+        ball.lastWallCollisionTime = currentTime;
+        console.log(`[DEBUG COLLISION] Updated lastWallCollisionTime to ${currentTime}`);
+
+        const newV = addRandomAngle(ball.velocity.x, ball.velocity.y);
+        ball.velocity.x = newV.x;
+        ball.velocity.y = newV.y;
+        console.log(`[DEBUG COLLISION] After random angle: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
         
-        // Jouer MIDI pour le sol aussi
-        if (midiEnabled && hasMIDISequence()) {
-          const midiVolumeAdjusted = Math.min(1.0, Math.max(0.4, collisionIntensity / 8)) * (midiVolume || 0.7);
-          playMIDINote(midiVolumeAdjusted);
+        // Grow the ball on collision
+        const maxBallRadius = (Math.min(canvasWidth, canvasHeight) / 2) * MAX_BALL_RADIUS_FACTOR;
+        const growthFactor = growthRate * 0.5; 
+        const oldRadius = ball.radius;
+        ball.radius = Math.min(ball.radius + growthFactor, maxBallRadius);
+        console.log(`[DEBUG COLLISION] Ball grown from ${oldRadius.toFixed(2)} to ${ball.radius.toFixed(2)}`);
+      }
+
+      // Calculer le volume sonore en fonction de la vitesse d'impact
+      const impactVolume = Math.min(initialSpeed / 15, 1) * bounceVolume * 0.3;
+      console.log(`[DEBUG WALL SOUND] Initial speed ${initialSpeed.toFixed(2)} converted to impact volume ${impactVolume.toFixed(2)}`);
+      
+      // Toujours jouer le son, indépendamment de l'immunité physique
+      if (standardSoundsEnabled) {
+        try {
+          // DEBUG: Afficher plus de détails sur les états sonores
+          console.log(`[DEBUG WALL SOUND] Wall: ${wall}, useCustomSounds: ${useCustomSounds}, hasCustomWall: ${hasCustomSound('wall')}, impactVolume: ${impactVolume}`);
+          
+          // Vérifier si un son personnalisé est disponible
+          if (useCustomSounds && hasCustomSound('wall')) {
+            // Si un son personnalisé est disponible, utiliser seulement le son personnalisé
+            console.log(`[DEBUG WALL SOUND] Playing custom wall sound for ${wall} collision`);
+            playWallSound(impactVolume, true);
+            
+            // DEBUG: Validation après l'appel
+            console.log(`[DEBUG WALL SOUND] Custom sound played with volume ${impactVolume}`);
+          } else {
+            // Si aucun son personnalisé n'est disponible, utiliser le son standard
+            console.log(`[DEBUG WALL SOUND] Reason for standard sound: useCustomSounds=${useCustomSounds}, hasCustomSound('wall')=${hasCustomSound('wall')}`);
+            console.log(`[DEBUG WALL SOUND] Using standard bounce sound for ${wall} collision`);
+            playBounceSound(impactVolume);
+          }
+        } catch (e) {
+          console.error(`[DEBUG WALL SOUND] Error playing wall collision sound:`, e);
         }
       } else {
-        // Si la vitesse est très faible, "coller" au sol
-        ball.velocity.y = 0;
-        // Appliquer une friction horizontale plus faible pour garder du mouvement
-        ball.velocity.x *= (1 - (DEFAULT_FRICTION * 2.5));
+        console.log(`[DEBUG WALL SOUND] Standard sounds disabled, no sound played`);
       }
-    }
-    
-    // Collision avec le plafond
-    if (ball.position.y - ball.radius < 0) {
-      // Corriger la position
-      ball.position.y = ball.radius;
       
-      // MODIFICATION: Boost similaire aux murs latéraux
-      const speedSqr = ball.velocity.y * ball.velocity.y;
-      const boostFactor = 1.0 + (bounciness * 0.25);
-      const energyRetained = Math.min(1.2, (bounciness - 0.03 * (speedSqr / 100)) * boostFactor);
-      
-      // Inverser la vitesse verticale avec moins de perte d'énergie
-      ball.velocity.y = -ball.velocity.y * energyRetained;
-      
-      // Léger ajustement horizontal
-      ball.velocity.x += (Math.random() - 0.5) * 0.2;
-      
-      collision = true;
-      collisionIntensity = Math.abs(ball.velocity.y);
-      wallType = 'ceiling';
-      
-      // Jouer MIDI pour le plafond aussi
-      if (midiEnabled && hasMIDISequence()) {
-        const midiVolumeAdjusted = Math.min(1.0, Math.max(0.4, collisionIntensity / 8)) * (midiVolume || 0.7);
-        playMIDINote(midiVolumeAdjusted);
-      }
-    }
-    
-    // Si une collision s'est produite, jouer des sons et effets
-    if (collision && collisionIntensity > 0.3) {
-      const now = Date.now();
-      // Ne jouer le son que si le dernier rebond date d'un certain temps
-      if (now - (ball as EnhancedBall).lastCollisionTime! > 150) {
-        // Volume en fonction de l'intensité de la collision - uniquement pour le son de rebond
-        const bounceVolumeAdjusted = Math.min(0.7, Math.max(0.2, collisionIntensity / 10)) * bounceVolume;
-        
-        // Volume pour les autres sons, sans être affecté par bounceVolume
-        const otherSoundsVolume = Math.min(0.7, Math.max(0.2, collisionIntensity / 10));
-        
-        // Jouer le son de rebond standard si activé (avec bounceVolume)
-        if (standardSoundsEnabled) {
-          playBounceSound(bounceVolumeAdjusted);
-        }
-        
-        // Jouer plusieurs segments de son progressif lors d'une collision avec un mur
-        // Utilise progressiveSoundVolume au lieu de bounceVolume
-        if (progressiveSoundEnabled && hasProgressiveSound()) {
-          // Calculer le nombre de segments à jouer en fonction de l'intensité 
-          // de la collision et de la vitesse de la balle
-          const speed = Math.sqrt(ball.velocity.x * ball.velocity.x + ball.velocity.y * ball.velocity.y);
-          const segmentsToPlay = Math.min(4, Math.max(2, Math.floor(collisionIntensity / 4)));
+      // Gestion MIDI
+      if (midiEnabled && typeof playMIDINote === 'function' && hasMIDISequence()) {
+        try {
+          const normalizedSpeed = Math.min(1, initialSpeed / 15);
+          const volume = 0.5 + normalizedSpeed * 0.5;
           
-          // Jouer le premier segment immédiatement avec le volume progressif (non affecté par bounceVolume)
-          playNextProgressiveSoundPart(progressiveSoundVolume);
+          // Jouer une note MIDI plus longue et plus audible
+          playMIDINote(volume * midiVolume);
           
-          // Jouer les segments supplémentaires avec un court délai entre chacun
-          // et un volume décroissant, toujours basé sur progressiveSoundVolume
-          for (let i = 1; i < segmentsToPlay; i++) {
-            setTimeout(() => {
-              // Réduire le volume progressivement pour chaque segment suivant
-              const fadeVolume = progressiveSoundVolume * (1 - i * 0.2);
-              playNextProgressiveSoundPart(fadeVolume);
-            }, i * 180); // Légèrement plus de délai entre les segments pour une meilleure perception
+          // Ajouter un délai pour jouer une seconde note pour rendre le son plus reconnaissable
+          if (normalizedSpeed > 0.5) {
+            setTimeout(() => playMIDINote(volume * 0.8 * midiVolume), 150);
           }
-        }
-        
-        // CORRECTION: Appel renforcé pour jouer MIDI
-        // Jouer une note MIDI si le mode MIDI est activé - appel direct ici aussi
-        if (midiEnabled && hasMIDISequence()) {
-          // Ajuster le volume en fonction de l'intensité de la collision
-          const midiVolumeAdjusted = Math.min(1.0, Math.max(0.3, collisionIntensity / 8)) * (midiVolume || 0.7);
-          
-          // Console log pour débogage
-          console.log("Tentative de jouer MIDI:", midiEnabled, midiVolumeAdjusted, collisionIntensity);
-          
-          // Jouer la note MIDI
-          playMIDINote(midiVolumeAdjusted);
-          
-          // Pour les collisions plus fortes, jouer une note supplémentaire avec délai
-          if (collisionIntensity > 1.2) {
-            setTimeout(() => {
-              playMIDINote(midiVolumeAdjusted * 0.6);
-            }, 150);
-          }
-        }
-        
-        // Si la musique extraite est activée, jouer aussi une note (avec son propre volume)
-        if (extractedMusicEnabled) {
-          playNextExtractedNote(otherSoundsVolume);
-          
-          // Ajouter une deuxième note avec délai pour plus de richesse sonore
-          if (collisionIntensity > 0.8) {
-            setTimeout(() => {
-              playNextExtractedNote(otherSoundsVolume * 0.7);
-            }, 200);
-          }
-        }
-        
-        // Si la musique de balle est activée, jouer une note de la gamme musicale assignée (avec son propre volume)
-        if (musicEnabled && (ball as EnhancedBall).musicScale) {
-          playBallMusicNote(ball.id, otherSoundsVolume, collisionIntensity);
-        }
-        
-        // Appeler le callback de collision s'il existe
-        // Passer le progressiveSoundVolume plutôt que le bounceVolume
-        if (onBallCollision) {
-          onBallCollision(progressiveSoundVolume);
-        }
-        
-        // Mettre à jour le temps de la dernière collision
-        (ball as EnhancedBall).lastCollisionTime = now;
-        
-        // Ajouter un effet visuel plus important pour les collisions à haute vitesse
-        if (effectsEnabled && collisionIntensity > 1.5) {
-          (ball as EnhancedBall).pulseEffect = Math.min(1.0, collisionIntensity / 8);
-          
-          if (bgEffectsEnabled) {
-            // Augmenter la luminosité de l'arrière-plan en fonction de l'intensité
-            setBackgroundBrightness(prev => Math.min(prev + collisionIntensity * 1.5, 40));
-          }
+        } catch (e) {
+          console.error(`[BOUNCE-${wall}] Erreur MIDI:`, e);
         }
       }
-    }
-    
-    // Limiter les vitesses pour éviter les comportements erratiques après une collision
-    const speed = Math.sqrt(
-      ball.velocity.x * ball.velocity.x + 
-      ball.velocity.y * ball.velocity.y
-    );
-    
-    // MODIFICATION: Permettre des vitesses plus élevées pour des rebonds plus dynamiques
-    // Utiliser une limite de vitesse qui augmente avec bounciness
-    const dynamicMaxSpeed = maxBallSpeed * (1 + (bounciness - 0.75) * 0.3);
-    
-    if (speed > dynamicMaxSpeed) {
-      const ratio = dynamicMaxSpeed / speed;
-      ball.velocity.x *= ratio;
-      ball.velocity.y *= ratio;
-    }
-    
-    // MODIFICATION: Empêcher les balles de ralentir trop vite
-    // Si la balle ralentit trop, lui donner occasionnellement un petit boost
-    if (speed < MIN_VELOCITY * 1.5 && Math.random() > 0.7) {
-      const boostFactor = 1.0 + (Math.random() * 0.2);
-      ball.velocity.x *= boostFactor;
-      ball.velocity.y *= boostFactor;
+    } else {
+      console.log(`[DEBUG COLLISION] No wall collision detected`);
     }
   };
 
-  // Mettre à jour le volume MIDI
   useEffect(() => {
-    if (midiVolume !== undefined) {
-      setMIDIVolume(midiVolume);
-    }
-  }, [midiVolume]);
-
-  return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      {isPlaying ? (
-        <div style={{ position: 'absolute', top: 10, left: 10, color: 'white', fontSize: 24, zIndex: 10 }}>
-          Score: {gameState.score}
-        </div>
-      ) : (
-        <div 
-          style={{ 
-            position: 'absolute', 
-            top: '50%', 
-            left: '50%', 
-            transform: 'translate(-50%, -50%)', 
-            color: 'white',
-            textAlign: 'center',
-            zIndex: 10 
-          }}
-        >
-          <div style={{ fontSize: 32, marginBottom: 20 }}>Game Over</div>
-          <div style={{ fontSize: 24, marginBottom: 30 }}>Score: {gameState.score}</div>
-          <button 
-            onClick={() => {
-              setGameState({
-                balls: [],
+    if (isPlaying) {
+      // Start the animation if it's not already running
+      if (!requestRef.current) {
+        initSound();
+        
+        // Set the MIDI tonality and instrument preset
+        if (midiEnabled) {
+          setMIDITonality(midiTonality);
+          if (midiInstrumentPreset) {
+            setMIDIInstrumentPreset(midiInstrumentPreset);
+          }
+          if (midiTrackIndex !== undefined) {
+            setMIDITrackIndex(midiTrackIndex);
+          }
+          setMIDIVolume(midiVolume);
+        }
+        
+        // Set progressive sound volume
+        if (progressiveSoundEnabled && hasProgressiveSound()) {
+          setProgressiveSoundVolume(progressiveSoundVolume);
+        }
+        
+        // Create the initial balls only when game starts
+        if (gameState.balls.length === 0) {
+          const initialBalls: EnhancedBall[] = [];
+          const canvas = canvasRef.current;
+          
+          if (canvas) {
+            for (let i = 0; i < initialBallCount; i++) {
+              // Create a ball with random position but constrained within the canvas
+              const centerX = Math.random() * canvas.width * 0.8 + canvas.width * 0.1;
+              const centerY = Math.random() * canvas.height * 0.8 + canvas.height * 0.1;
+              
+              const angle = Math.random() * Math.PI * 2;
+              const speed = ballSpeed * (0.7 + Math.random() * 0.6); // Variation in speed
+              
+              // Give each ball a random direction
+              const vx = Math.cos(angle) * speed;
+              const vy = Math.sin(angle) * speed;
+              
+              // Variation in size
+              const radius = 20 + Math.random() * 15;
+              
+              // Randomly assign colors
+              const colors = ['red', 'blue', 'green', 'yellow', 'purple', 'orange'];
+              const color = colors[Math.floor(Math.random() * colors.length)];
+              
+              // Assign an image if using custom images
+              let imageIndex = -1;
+              let ballImage = null;
+              if (useCustomImages && customImages.length > 0 && loadedImages.length > 0) {
+                // Use assigned image if available, otherwise random
+                imageIndex = ballImageAssignments[i] !== undefined ? 
+                  ballImageAssignments[i] : 
+                  Math.floor(Math.random() * loadedImages.length);
+                
+                // Ensure index is within bounds
+                imageIndex = Math.max(0, Math.min(loadedImages.length - 1, imageIndex));
+                ballImage = loadedImages[imageIndex];
+              }
+              
+              // Assign a music scale if music is enabled
+              let musicScale: MusicScaleKey | CustomMusicKey | undefined = undefined;
+              if (musicEnabled) {
+                if (ballMusicAssignments[i]) {
+                  // Use assigned scale if available
+                  musicScale = ballMusicAssignments[i];
+                } else {
+                  // Otherwise random scale
+                  const scales = Object.keys(MUSIC_SCALES) as MusicScaleKey[];
+                  musicScale = scales[Math.floor(Math.random() * scales.length)];
+                }
+              }
+              
+              const newBall: EnhancedBall = {
+                id: `ball-${Date.now()}-${i}`,
+                position: { x: centerX, y: centerY },
+                velocity: { x: vx, y: vy },
+                radius,
+                color,
+                image: ballImage,
+                imageIndex: imageIndex,
+                pulseEffect: 0,
+                glowSize: 0, 
+                glowOpacity: 0,
+                squash: 0,
+                rotation: 0,
                 score: 0,
-                gameOver: false
-              });
-              requestRef.current = undefined;
-            }}
-            style={{
-              background: 'linear-gradient(45deg, #ff4b4b, #ff9b4b)',
-              border: 'none',
-              color: 'white',
-              padding: '10px 20px',
-              borderRadius: '20px',
-              fontSize: '18px',
-              cursor: 'pointer',
-              boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)'
-            }}
-          >
-            Play Again
-          </button>
-        </div>
-      )}
+                lastCollisionTime: 0,
+                lastWallCollisionTime: 0,
+                growing: false,
+                musicScale,
+                // Masse proportionnelle au rayon
+                mass: radius * radius * 0.01,
+                // Élasticité aléatoire pour varier les rebonds
+                elasticity: 0.8 + Math.random() * 0.2,
+                // Légère rotation aléatoire
+                angularVelocity: (Math.random() - 0.5) * 0.02,
+                // Stocker la vitesse initiale pour maintenir constante (si besoin)
+                initialSpeed: speed
+              };
+              
+              initialBalls.push(newBall);
+            }
+            
+            setGameState(prevState => ({
+              ...prevState,
+              balls: initialBalls,
+              score: 0,
+              isGameOver: false
+            }));
+          }
+        }
+        
+        // Comme 'animate' est définie dans le composant, nous ne pouvons pas y référer directement ici
+        // Nous devons juste lancer l'animation initiale et laisser la récursion fonctionner
+        requestRef.current = requestAnimationFrame(() => {
+          // La fonction animate sera appelée automatiquement lorsque le composant sera entièrement rendu
+        });
+      }
+    } else {
+      // Stop the animation
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = undefined;
+      }
+    }
+    
+    return () => {
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = undefined;
+      }
+    };
+  }, [isPlaying, ballCount, growthRate, gravity, ballSpeed]);  // Removed effectsEnabled from dependency array
 
-      {/* Recording controls */}
-      <div style={{ position: 'absolute', bottom: '10px', right: '10px', zIndex: 100, display: 'flex', gap: '10px' }}>
-        <button 
-          onClick={toggleRecording}
-          style={{
-            background: isRecording ? '#ff4b4b' : '#4b4bff',
-            border: 'none',
-            color: 'white',
-            padding: '8px 16px',
-            borderRadius: '20px',
-            fontSize: '14px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
-        >
-          {isRecording ? (
-            <>
-              <span style={{ 
-                width: '10px', 
-                height: '10px', 
-                backgroundColor: 'white', 
-                display: 'inline-block' 
-              }}></span>
-              Stop Recording
-            </>
-          ) : (
-            <>
-              <span style={{ 
-                width: '10px', 
-                height: '10px', 
-                backgroundColor: 'white', 
-                borderRadius: '50%', 
-                display: 'inline-block' 
-              }}></span>
-              Record for TikTok
-            </>
-          )}
-        </button>
-
-        {videoBlob && (
-          <button 
-            onClick={handleDownloadVideo}
-            style={{
-              background: '#4bff4b',
-              border: 'none',
-              color: 'white',
-              padding: '8px 16px',
-              borderRadius: '20px',
-              fontSize: '14px',
-              cursor: 'pointer'
-            }}
-          >
-            Download Video
-          </button>
-        )}
-      </div>
-
-      {/* Recording indicator */}
-      {isRecording && (
-        <div style={recordingStyles.container as React.CSSProperties}>
-          <div style={recordingStyles.recordIcon as React.CSSProperties} />
-          <div style={recordingStyles.time as React.CSSProperties}>
-            {Math.floor(recordingTime / 1000).toString().padStart(2, '0')}:{(Math.floor(recordingTime / 10) % 100).toString().padStart(2, '0')}
-          </div>
-        </div>
-      )}
-
-      <canvas
+  // Return the JSX canvas element
+  return (
+    <div 
+      className="growing-ball-game" 
+      style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center',
+        width: '100%',
+        height: '100%'
+      }}
+    >
+      <canvas 
         ref={canvasRef}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
         style={{ 
           display: 'block', 
-          width: '100%', 
-          height: '100%', 
-          touchAction: 'none'
+          background: 'black', 
+          touchAction: 'none',
+          border: '1px solid rgba(255,255,255,0.2)',
+          boxShadow: '0 0 10px rgba(0,0,0,0.5)'
         }}
       />
+      {isRecording && (
+        <div style={recordingStyles.container}>
+          <div style={recordingStyles.recordIcon}></div>
+          <div style={recordingStyles.time}>{formatRecordingTime(recordingTime)}</div>
+        </div>
+      )}
     </div>
   );
 };
 
-export default GrowingBall; 
+export default GrowingBall;
+

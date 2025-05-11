@@ -57,10 +57,11 @@ let isSoundInitialized = false;
 // Cache pour les effets sonores
 const soundCache: { [key: string]: AudioBuffer } = {};
 // Sons personnalisés uploadés par l'utilisateur
-let customSounds: { bounce: AudioBuffer | null, grow: AudioBuffer | null, gameOver: AudioBuffer | null } = {
+let customSounds: { bounce: AudioBuffer | null, grow: AudioBuffer | null, gameOver: AudioBuffer | null, wall: AudioBuffer | null } = {
   bounce: null,
   grow: null,
-  gameOver: null
+  gameOver: null,
+  wall: null
 };
 
 // Point d'envoi pour l'enregistrement audio
@@ -97,11 +98,27 @@ let progressiveFadeInTime = 0.02; // Fondu d'entrée en secondes
 let progressiveFadeOutTime = 0.1; // Fondu de sortie en secondes
 
 // Variables pour le support MIDI
-let midiSequence: number[] = [];
-let currentMidiIndex = 0;
-let midiVolume = 0.7;
-let rawMidiData: any = null; // Pour stocker les données MIDI brutes
-let midiNotes: number[] = []; // Pour stocker les notes extraites du fichier MIDI
+let midiNotes: { note: number, track: number, timing: number }[] = []; // Notes MIDI avec timing et information de piste
+let midiCurrentIndex = 0; // Index de la note MIDI actuelle à jouer
+let midiVolume = 0.7; // Volume MIDI
+let midiFileLoaded = false; // Indique si un fichier MIDI a été chargé
+let midiTonality = "C"; // Tonalité par défaut (C)
+let midiTranspose = 0; // Valeur de transposition (en demi-tons)
+
+// Définition des types et constantes pour les presets d'instrument AVANT leur utilisation
+export const MIDI_INSTRUMENT_PRESETS = {
+  MELODIC_MAIN: 'melodic_main', // PolySynth (case 0)
+  PAD_STRINGS: 'pad_strings',   // Sine Synth (case 1)
+  PERCUSSIVE: 'percussive',     // Triangle Synth (case 2)
+  METAL_SYNTH: 'metal_synth',   // MetalSynth (case 3)
+  FM_SYNTH: 'fm_synth',         // FMSynth (case 4)
+  DEFAULT_CYCLING: 'default_cycling' // Comportement original (track % 5)
+} as const;
+
+export type MIDIInstrumentPresetKey = typeof MIDI_INSTRUMENT_PRESETS[keyof typeof MIDI_INSTRUMENT_PRESETS];
+
+let midiSelectedInstrumentPreset: MIDIInstrumentPresetKey = MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING; // Instrument sélectionné
+let midiSelectedTrackIndex: number | null = null; // Piste MIDI sélectionnée (null pour toutes les pistes principales)
 
 /**
  * Récupère le contexte audio actuel ou en crée un nouveau si nécessaire
@@ -159,22 +176,34 @@ export const connectToRecorder = (destination: MediaStreamAudioDestinationNode):
 };
 
 // Sound for ball bounce
-export const playBounceSound = (volume: number = 0.7, useCustom: boolean = false): void => {
+export const playBounceSound = (
+  volume: number = 0.3, 
+  useCustom: boolean = false, 
+  soundType: CustomSoundType = 'bounce'
+): void => {
   // Ne rien jouer si les sons standards sont désactivés (à moins qu'on utilise un son custom)
   if (!standardSoundsEnabled && !useCustom) return;
   
   if (!audioContext) return;
   
   try {
+    console.log(`Playing ${soundType} sound with volume ${volume}, useCustom=${useCustom}`);
+    
     // Utiliser le son personnalisé s'il existe et si demandé
-    const soundBuffer = (useCustom && customSounds.bounce) ? customSounds.bounce : soundCache['bounce'];
-    if (!soundBuffer) return;
+    const soundBuffer = (useCustom && customSounds[soundType]) ? customSounds[soundType] : soundCache['bounce'];
+    
+    // Vérifier si le tampon sonore existe
+    if (!soundBuffer) {
+      console.warn(`No sound buffer available for ${soundType}`);
+      return;
+    }
     
     const source = audioContext.createBufferSource();
     source.buffer = soundBuffer;
     
     const gainNode = audioContext.createGain();
-    gainNode.gain.value = Math.min(1.0, Math.max(0.1, volume));
+    // Réduire encore davantage le volume en le divisant par 2
+    gainNode.gain.value = Math.min(0.5, Math.max(0.05, volume / 2));
     
     source.connect(gainNode);
     
@@ -188,27 +217,43 @@ export const playBounceSound = (volume: number = 0.7, useCustom: boolean = false
     
     source.start();
   } catch (e) {
-    console.error("Error playing bounce sound:", e);
+    console.error(`Error playing ${soundType} sound:`, e);
   }
 };
 
 // Sound for ball growing
 export const playGrowSound = (volume: number = 0.5, useCustom: boolean = false): void => {
-  // Ne rien jouer si les sons standards sont désactivés (à moins qu'on utilise un son custom)
-  if (!standardSoundsEnabled && !useCustom) return;
+  console.log(`[DEBUG GROW SOUND] playGrowSound called with volume=${volume}, useCustom=${useCustom}, soundEnabled=${standardSoundsEnabled}`);
   
-  if (!audioContext) return;
+  // Ne rien jouer si les sons standards sont désactivés (à moins qu'on utilise un son custom)
+  if (!standardSoundsEnabled && !useCustom) {
+    console.log('[DEBUG GROW SOUND] Standard sounds disabled and not using custom, returning');
+    return;
+  }
+  
+  if (!audioContext) {
+    console.log('[DEBUG GROW SOUND] No audio context available, returning');
+    return;
+  }
   
   try {
     // Utiliser le son personnalisé s'il existe et si demandé
-    const soundBuffer = (useCustom && customSounds.grow) ? customSounds.grow : soundCache['grow'];
-    if (!soundBuffer) return;
+    const hasCustomGrowSound = useCustom && customSounds.grow !== null;
+    console.log(`[DEBUG GROW SOUND] hasCustomGrowSound: ${hasCustomGrowSound}, customSounds.grow exists: ${!!customSounds.grow}`);
     
+    const soundBuffer = hasCustomGrowSound ? customSounds.grow : soundCache['grow'];
+    if (!soundBuffer) {
+      console.warn('[DEBUG GROW SOUND] No sound buffer available, returning');
+      return;
+    }
+    
+    console.log(`[DEBUG GROW SOUND] Using ${hasCustomGrowSound ? 'custom' : 'default'} grow sound`);
     const source = audioContext.createBufferSource();
     source.buffer = soundBuffer;
     
     const gainNode = audioContext.createGain();
     gainNode.gain.value = Math.min(1.0, Math.max(0.1, volume));
+    console.log(`[DEBUG GROW SOUND] Set gain to ${gainNode.gain.value.toFixed(2)}`);
     
     source.connect(gainNode);
     
@@ -218,11 +263,13 @@ export const playGrowSound = (volume: number = 0.5, useCustom: boolean = false):
     // Also connect to recorder destination if available
     if (recorderDestination) {
       gainNode.connect(recorderDestination);
+      console.log('[DEBUG GROW SOUND] Connected to recorder destination');
     }
     
     source.start();
+    console.log('[DEBUG GROW SOUND] Sound playback started successfully');
   } catch (e) {
-    console.error("Error playing grow sound:", e);
+    console.error("[DEBUG GROW SOUND] Error playing grow sound:", e);
   }
 };
 
@@ -466,8 +513,8 @@ const loadDefaultSounds = async (): Promise<void> => {
   if (!audioContext) return;
   
   try {
-    // Son de rebond (fréquence plus haute pour l'effet de rebond)
-    const bounceBuffer = await createSimpleTone(audioContext, 1200, 0.1);
+    // Son de rebond (fréquence plus basse pour un son moins intrusif)
+    const bounceBuffer = await createSimpleTone(audioContext, 800, 0.08);
     soundCache['bounce'] = bounceBuffer;
     
     // Son de croissance (fréquence plus grave pour l'effet de grossissement)
@@ -495,11 +542,13 @@ const createSimpleTone = (
     const channelData = buffer.getChannelData(0);
     
     for (let i = 0; i < frameCount; i++) {
-      // Créer une onde sinusoïdale simple
+      // Créer une onde sinusoïdale simple avec montée et descente plus progressive
       const t = i / sampleRate;
-      // Amplitude qui diminue avec le temps (pour un effet de fondu sortant)
-      const fadeOut = 1 - t / duration;
-      channelData[i] = Math.sin(2 * Math.PI * frequency * t) * fadeOut * 0.5;
+      // Amplitude qui diminue plus rapidement (exponentielle au lieu de linéaire)
+      const fadeIn = Math.min(1, t * 20); // Montée rapide pour éviter les clics
+      const fadeOut = Math.exp(-3 * t / duration); // Descente exponentielle plus douce
+      // Utiliser une fréquence plus basse pour un son moins aigu
+      channelData[i] = Math.sin(2 * Math.PI * (frequency * 0.7) * t) * fadeIn * fadeOut * 0.3;
     }
     
     resolve(buffer);
@@ -527,31 +576,69 @@ const createGameOverSound = (context: AudioContext): Promise<AudioBuffer> => {
   });
 };
 
-// Charge un son personnalisé à partir d'un fichier
-export const loadCustomSound = async (file: File, soundType: 'bounce' | 'grow' | 'gameOver'): Promise<void> => {
-  if (!audioContext) return;
+// Type de son personnalisé
+export type CustomSoundType = 'bounce' | 'grow' | 'gameOver' | 'wall';
+
+// Load a custom sound from a file
+export const loadCustomSound = async (file: File, soundType: CustomSoundType): Promise<void> => {
+  console.log(`[DEBUG SOUND LOADING] Starting to load custom ${soundType} sound from file: ${file.name}, size: ${file.size} bytes`);
+  
+  if (!audioContext) {
+    console.error(`[DEBUG SOUND LOADING] No audio context available for loading ${soundType} sound`);
+    try {
+      // Try initializing the audio context if it doesn't exist
+      console.log('[DEBUG SOUND LOADING] Attempting to initialize audio context');
+      initSound();
+      if (!audioContext) {
+        console.error('[DEBUG SOUND LOADING] Failed to initialize audio context');
+        return;
+      }
+    } catch (error) {
+      console.error('[DEBUG SOUND LOADING] Error initializing audio context:', error);
+      return;
+    }
+  }
   
   try {
+    // First clear any existing custom sound of this type
+    if (customSounds[soundType]) {
+      console.log(`[DEBUG SOUND LOADING] Clearing existing ${soundType} sound before loading new one`);
+      customSounds[soundType] = null;
+    }
+    
+    console.log(`[DEBUG SOUND LOADING] Processing file for ${soundType} sound`);
     const arrayBuffer = await file.arrayBuffer();
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    console.log(`[DEBUG SOUND LOADING] File converted to array buffer, size: ${arrayBuffer.byteLength} bytes`);
     
-    // Stocker le son personnalisé
-    customSounds[soundType] = audioBuffer;
-    
-    console.log(`Custom ${soundType} sound loaded successfully.`);
+    try {
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      console.log(`[DEBUG SOUND LOADING] Audio successfully decoded for ${soundType} sound`);
+      
+      // Store the custom sound
+      customSounds[soundType] = audioBuffer;
+      
+      console.log(`[DEBUG SOUND LOADING] Custom ${soundType} sound loaded successfully. Duration: ${audioBuffer.duration.toFixed(2)}s`);
+      console.log(`[DEBUG SOUND LOADING] Current customSounds state:`, 
+        Object.entries(customSounds).map(([key, value]) => `${key}: ${value ? 'loaded' : 'null'}`));
+    } catch (decodeError) {
+      console.error(`[DEBUG SOUND LOADING] Error decoding audio data for ${soundType}:`, decodeError);
+      // Even if decoding fails, make sure we don't block future sound playback
+      customSounds[soundType] = null;
+    }
   } catch (e) {
-    console.error(`Error loading custom ${soundType} sound:`, e);
+    console.error(`[DEBUG SOUND LOADING] Error loading custom ${soundType} sound:`, e);
+    // Make sure we don't leave this sound in an undefined state
+    customSounds[soundType] = null;
   }
 };
 
-// Vérifie si un son personnalisé est disponible
-export const hasCustomSound = (soundType: 'bounce' | 'grow' | 'gameOver'): boolean => {
-  return customSounds[soundType] !== null;
-};
-
-// Supprime un son personnalisé
-export const clearCustomSound = (soundType: 'bounce' | 'grow' | 'gameOver'): void => {
+// Clear a custom sound
+export const clearCustomSound = (soundType: CustomSoundType): void => {
+  console.log(`[DEBUG SOUND] Clearing custom ${soundType} sound. Before clearing:`, customSounds[soundType] ? 'loaded' : 'null');
+  // Set the custom sound to null
   customSounds[soundType] = null;
+  console.log(`[DEBUG SOUND] Custom ${soundType} sound cleared. Current customSounds state:`, Object.entries(customSounds)
+    .map(([key, value]) => `${key}: ${value ? 'loaded' : 'null'}`).join(', '));
 };
 
 /**
@@ -774,22 +861,22 @@ export const loadProgressiveSound = async (file: File): Promise<void> => {
       } catch (e) {
         console.error('Impossible de créer un contexte audio:', e);
         reject('Erreur de contexte audio');
-        return;
-      }
+      return;
     }
-    
+  }
+  
     const reader = new FileReader();
     reader.onload = async (event) => {
       if (!event.target || !event.target.result || !progressiveAudioContext) {
         reject('Erreur de lecture du fichier');
         return;
-      }
-      
+    }
+    
       try {
         // Décoder le fichier audio
         const arrayBuffer = event.target.result as ArrayBuffer;
         const audioBuffer = await progressiveAudioContext.decodeAudioData(arrayBuffer);
-        
+    
         // Stocker le buffer audio
         progressiveAudioBuffer = audioBuffer;
         
@@ -800,10 +887,10 @@ export const loadProgressiveSound = async (file: File): Promise<void> => {
         progressiveTotalSegments = Math.max(4, Math.min(Math.floor(totalDuration / progressiveSegmentDuration), 12));
         // Ajuster la durée des segments pour qu'ils soient égaux
         progressiveSegmentDuration = totalDuration / progressiveTotalSegments;
-        
+      
         // Réinitialiser le segment courant
         currentProgressiveSegment = 0;
-        
+      
         // Créer le gain node pour contrôler le volume
         if (progressiveGainNode) {
           progressiveGainNode.disconnect();
@@ -818,9 +905,9 @@ export const loadProgressiveSound = async (file: File): Promise<void> => {
       } catch (e) {
         console.error('Erreur de décodage audio:', e);
         reject('Erreur de décodage audio');
-      }
-    };
-    
+  }
+};
+
     reader.onerror = (event) => {
       reject('Erreur de lecture du fichier');
     };
@@ -871,11 +958,11 @@ export const playNextProgressiveSoundPart = (volume = 0.7): void => {
   // Créer une nouvelle source
   progressiveAudioSource = progressiveAudioContext.createBufferSource();
   progressiveAudioSource.buffer = progressiveAudioBuffer;
-  
+    
   // Calculer la durée de lecture
   const startOffset = currentProgressiveSegment * progressiveSegmentDuration;
   let endOffset = startOffset + progressiveSegmentDuration;
-  
+    
   // Ajouter un chevauchement (overlap) pour des transitions plus fluides
   const overlapTime = progressiveSegmentDuration * progressiveOverlapFactor;
   if (startOffset > overlapTime) {
@@ -907,7 +994,7 @@ export const playNextProgressiveSoundPart = (volume = 0.7): void => {
     if (progressiveAudioSource) {
       progressiveAudioSource.disconnect();
       progressiveAudioSource = null;
-    }
+          }
   };
 };
 
@@ -942,7 +1029,7 @@ export const clearProgressiveSound = (): void => {
 export const setProgressiveOverlap = (factor: number): void => {
   progressiveOverlapFactor = Math.max(0, Math.min(0.5, factor));
 };
-
+  
 // Fonction pour définir les durées de fade
 export const setProgressiveFades = (fadeIn: number, fadeOut: number): void => {
   progressiveFadeInTime = Math.max(0.01, Math.min(0.2, fadeIn));
@@ -1270,383 +1357,553 @@ export const resetExtractedNotes = (): void => {
 };
 
 /**
- * Convertit un fichier audio en séquence MIDI
- * @param file Le fichier audio à convertir
- * @param noteCount Le nombre de notes à extraire
- */
-export const convertAudioToMIDI = async (file: File, noteCount: number = 24): Promise<void> => {
-  return new Promise(async (resolve, reject) => {
-    try {
-      // Décoder le fichier audio
-      const audioBuffer = await decodeAudioFile(file);
-      
-      // Extraire les fréquences dominantes
-      const frequencies = await analyzeAudioFrequencies(audioBuffer);
-      
-      // Convertir les fréquences en notes MIDI (entre 21 et 108, gamme standard du piano)
-      const midiNotes = frequencies
-        .map(freq => frequencyToMidi(freq))
-        .filter(note => note >= 21 && note <= 108)
-        .slice(0, noteCount);
-      
-      // Stocker la séquence MIDI
-      midiSequence = midiNotes;
-      currentMidiIndex = 0;
-      
-      console.log(`Séquence MIDI créée avec ${midiNotes.length} notes`);
-      resolve();
-    } catch (error) {
-      console.error('Erreur lors de la conversion MIDI:', error);
-      reject(error);
-    }
-  });
-};
-
-/**
- * Décode un fichier audio en AudioBuffer
- * @param file Le fichier audio à décoder
- * @returns Une promesse contenant l'AudioBuffer décodé
- */
-const decodeAudioFile = async (file: File): Promise<AudioBuffer> => {
-  return new Promise((resolve, reject) => {
-    const fileReader = new FileReader();
-    
-    fileReader.onload = async (event) => {
-      try {
-        const arrayBuffer = event.target?.result as ArrayBuffer;
-        const audioContext = getAudioContext();
-        
-        if (!audioContext) {
-          throw new Error('AudioContext not available');
-        }
-        
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        resolve(audioBuffer);
-      } catch (error) {
-        reject(error);
-      }
-    };
-    
-    fileReader.onerror = () => {
-      reject(new Error('Failed to read audio file'));
-    };
-    
-    fileReader.readAsArrayBuffer(file);
-  });
-};
-
-/**
- * Analyse les fréquences dominantes d'un AudioBuffer
- * @param audioBuffer Le buffer audio à analyser
- * @returns Les fréquences dominantes trouvées dans le fichier audio
- */
-const analyzeAudioFrequencies = async (audioBuffer: AudioBuffer): Promise<number[]> => {
-  // Obtenir les données du canal gauche (ou mono si un seul canal)
-  const channelData = audioBuffer.getChannelData(0);
-  const sampleRate = audioBuffer.sampleRate;
-  
-  // Diviser l'audio en segments pour l'analyse
-  const segmentSize = Math.floor(channelData.length / 24); // 24 segments par défaut
-  const frequencies: number[] = [];
-  
-  // Utiliser un AudioContext temporaire pour l'analyse
-  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-  const analyzer = audioContext.createAnalyser();
-  analyzer.fftSize = 2048;
-  
-  // Pour chaque segment, trouver la fréquence dominante
-  for (let i = 0; i < 24; i++) {
-    const startIndex = i * segmentSize;
-    const endIndex = Math.min(startIndex + segmentSize, channelData.length);
-    
-    if (endIndex - startIndex < 1024) continue; // Segment trop petit
-    
-    // Créer un buffer temporaire pour ce segment
-    const segmentBuffer = audioContext.createBuffer(1, endIndex - startIndex, sampleRate);
-    const segmentData = segmentBuffer.getChannelData(0);
-    
-    // Copier les données du segment
-    for (let j = 0; j < endIndex - startIndex; j++) {
-      segmentData[j] = channelData[startIndex + j];
-    }
-    
-    // Trouver la fréquence dominante dans ce segment
-    const dominantFrequency = findDominantFrequency(segmentData, sampleRate);
-    
-    if (dominantFrequency > 0) {
-      frequencies.push(dominantFrequency);
-    }
-  }
-  
-  // Fermer le contexte audio temporaire
-  await audioContext.close();
-  
-  return frequencies;
-};
-
-/**
- * Trouve la fréquence dominante dans un tableau de données audio
- * @param audioData Les données audio à analyser
- * @param sampleRate Le taux d'échantillonnage de l'audio
- * @returns La fréquence dominante en Hz
- */
-const findDominantFrequency = (audioData: Float32Array, sampleRate: number): number => {
-  // Utiliser une FFT (Fast Fourier Transform) pour convertir les données temporelles en données fréquentielles
-  const bufferSize = 2048;
-  const buffer = new Float32Array(bufferSize);
-  
-  // Copier les données du segment au centre (pour éviter les bords)
-  const start = Math.max(0, Math.floor((audioData.length - bufferSize) / 2));
-  for (let i = 0; i < bufferSize; i++) {
-    if (start + i < audioData.length) {
-      buffer[i] = audioData[start + i];
-    } else {
-      buffer[i] = 0;
-    }
-  }
-  
-  // Appliquer une fenêtre de Hanning pour réduire les fuites spectrales
-  for (let i = 0; i < bufferSize; i++) {
-    buffer[i] *= 0.5 * (1 - Math.cos(2 * Math.PI * i / (bufferSize - 1)));
-  }
-  
-  // Calculer la FFT (version simplifiée)
-  const real = new Float32Array(bufferSize);
-  const imag = new Float32Array(bufferSize);
-  
-  for (let i = 0; i < bufferSize; i++) {
-    real[i] = buffer[i];
-    imag[i] = 0;
-  }
-  
-  // Simuler une FFT en calculant des magnitudes simples
-  // (Dans une vraie application, utilisez une bibliothèque FFT complète)
-  const magnitudes = new Float32Array(bufferSize / 2);
-  
-  for (let i = 0; i < bufferSize / 2; i++) {
-    magnitudes[i] = Math.sqrt(real[i] * real[i] + imag[i] * imag[i]);
-  }
-  
-  // Trouver l'indice de la magnitude maximale
-  let maxIndex = 0;
-  let maxMagnitude = 0;
-  
-  for (let i = 1; i < magnitudes.length; i++) {
-    if (magnitudes[i] > maxMagnitude) {
-      maxMagnitude = magnitudes[i];
-      maxIndex = i;
-    }
-  }
-  
-  // Convertir l'indice en fréquence
-  const frequency = maxIndex * sampleRate / bufferSize;
-  
-  return frequency;
-};
-
-/**
- * Convertit une fréquence en note MIDI
- * @param frequency La fréquence en Hz
- * @returns Le numéro de note MIDI le plus proche
- */
-const frequencyToMidi = (frequency: number): number => {
-  // La formule pour convertir une fréquence en note MIDI:
-  // MIDI = 69 + 12 * log2(f / 440)
-  // 69 est la note A4 (440 Hz)
-  if (frequency <= 0) return 60; // C4 par défaut
-  
-  const midiNote = Math.round(69 + 12 * Math.log2(frequency / 440));
-  
-  // Limiter dans la plage MIDI standard (21-108)
-  return Math.min(108, Math.max(21, midiNote));
-};
-
-/**
- * Joue la prochaine note MIDI de la séquence
+ * Joue une note MIDI
  * @param volume Le volume de la note (0-1)
  */
 export const playMIDINote = (volume: number = 0.7): void => {
-  if (!midiSequence.length) return;
-  
-  const note = midiSequence[currentMidiIndex];
-  
-  // Utiliser Tone.js pour jouer la note MIDI
+  // Vérifier si nous avons des notes MIDI à jouer
+  if (!midiFileLoaded || midiNotes.length === 0) {
+    // console.log("[MIDI PLAY] Aucune note MIDI disponible"); // Commenté pour moins de verbosité
+    return;
+  }
+
   try {
-    const synth = new Tone.Synth().toDestination();
+    // S'assurer que Tone.js est démarré
+    if (Tone.Transport.state !== 'started') {
+      Tone.start().catch(err => console.log('Erreur démarrage Tone.js:', err));
+    }
+
+    // Obtenir la note actuelle
+    const noteIndex = midiCurrentIndex % midiNotes.length;
+    const noteData = midiNotes[noteIndex];
+
+    // MODIFICATION: Filtrer par piste si un index de piste est sélectionné
+    if (midiSelectedTrackIndex !== null && noteData.track !== midiSelectedTrackIndex) {
+      midiCurrentIndex = (midiCurrentIndex + 1) % midiNotes.length; // Passer à la note suivante
+      // Essayer de jouer la note suivante immédiatement si celle-ci est filtrée
+      if (midiNotes.length > 1) { // Pour éviter une boucle infinie si toutes les notes sont filtrées
+          playMIDINote(volume); 
+      }
+      return;
+    }
+
+    // console.log(`[MIDI PLAY] Note #${noteIndex}/${midiNotes.length-1}: Piste ${noteData.track}, Note ${noteData.note}, Instrument: ${midiSelectedInstrumentPreset}, Tonalité: ${midiTonality}`);
+
+    // Création d'un synthétiseur approprié
+    let synth: Tone.PolySynth | Tone.Synth | Tone.MetalSynth | Tone.FMSynth;
+    
+    // MODIFICATION: Utiliser l'instrument sélectionné ou le cycle par défaut
+    let instrumentChoice = midiSelectedInstrumentPreset;
+    if (instrumentChoice === MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING) {
+        const trackTypeLocal = noteData.track % 5; // Renamed to avoid conflict
+        switch (trackTypeLocal) {
+            case 0: instrumentChoice = MIDI_INSTRUMENT_PRESETS.MELODIC_MAIN; break;
+            case 1: instrumentChoice = MIDI_INSTRUMENT_PRESETS.PAD_STRINGS; break;
+            case 2: instrumentChoice = MIDI_INSTRUMENT_PRESETS.PERCUSSIVE; break;
+            case 3: instrumentChoice = MIDI_INSTRUMENT_PRESETS.METAL_SYNTH; break;
+            case 4: instrumentChoice = MIDI_INSTRUMENT_PRESETS.FM_SYNTH; break;
+            default: instrumentChoice = MIDI_INSTRUMENT_PRESETS.MELODIC_MAIN;
+        }
+    }
+
+    // MODIFICATION: Amélioration des paramètres de synthèse pour des sons plus reconnaissables
+    switch (instrumentChoice) {
+      case MIDI_INSTRUMENT_PRESETS.MELODIC_MAIN:
+        synth = new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: "triangle" },
+          envelope: { attack: 0.05, decay: 0.1, sustain: 0.7, release: 1.5 }
+        }).toDestination();
+        break;
+      case MIDI_INSTRUMENT_PRESETS.PAD_STRINGS:
+        synth = new Tone.Synth({
+          oscillator: { type: "sine" },
+          envelope: { attack: 0.1, decay: 0.3, sustain: 0.8, release: 2.0 }
+        }).toDestination();
+        break;
+      case MIDI_INSTRUMENT_PRESETS.PERCUSSIVE:
+        synth = new Tone.Synth({
+          oscillator: { type: "triangle" },
+          envelope: { attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.8 }
+        }).toDestination();
+        break;
+      case MIDI_INSTRUMENT_PRESETS.METAL_SYNTH:
+        synth = new Tone.MetalSynth({
+          envelope: { attack: 0.001, decay: 0.2, release: 0.5 },
+          harmonicity: 5.1, modulationIndex: 20, resonance: 4000, octaves: 1.5
+        }).toDestination();
+        break;
+      case MIDI_INSTRUMENT_PRESETS.FM_SYNTH:
+        synth = new Tone.FMSynth({
+          harmonicity: 3, modulationIndex: 5,
+          oscillator: { type: "sine" },
+          envelope: { attack: 0.05, decay: 0.3, sustain: 0.6, release: 1.2 },
+          modulation: { type: "square" },
+          modulationEnvelope: { attack: 0.2, decay: 0.01, sustain: 0.9, release: 0.7 }
+        }).toDestination();
+        break;
+      default: 
+        synth = new Tone.PolySynth(Tone.Synth).toDestination();
+    }
+
+    // Configurer le volume
     const adjustedVolume = Math.min(1, Math.max(0, volume * midiVolume));
     
-    synth.volume.value = Tone.gainToDb(adjustedVolume);
+    // Application du volume
+    if (synth.volume) {
+      synth.volume.value = Tone.gainToDb(adjustedVolume);
+    } else {
+      // Cas des synthés qui n'ont pas de propriété volume directe
+      const gainNode = new Tone.Gain(adjustedVolume).toDestination();
+      synth.connect(gainNode);
+      synth.disconnect(Tone.Destination);
+    }
     
-    // Convertir le numéro MIDI en nom de note pour Tone.js
-    const noteName = midiToNoteName(note);
+    // Conversion du numéro MIDI en note - meilleure conversion plus précise
+    const noteName = midiToNoteName(noteData.note);
     
-    console.log(`Playing MIDI note: ${note} (${noteName}) with volume ${adjustedVolume}`);
+    // MODIFICATION: Durée augmentée pour des notes plus reconnaissables
+    // Utiliser des durées plus longues pour toutes les notes
+    const duration = 0.6; // Durée fixe plus longue pour toutes les notes
     
-    // Jouer la note (durée de 0.3 secondes)
-    synth.triggerAttackRelease(noteName, 0.3);
+    // Jouer la note
+    if (instrumentChoice === MIDI_INSTRUMENT_PRESETS.METAL_SYNTH) { 
+      synth.triggerAttackRelease("C2", duration); // Ajouter une note de base
+    } else {
+      synth.triggerAttackRelease(noteName, duration);
+      
+      // MODIFICATION: Ajouter une répétition rapide de la note pour la rendre plus reconnaissable
+      if (instrumentChoice !== MIDI_INSTRUMENT_PRESETS.PAD_STRINGS) {
+        setTimeout(() => {
+          synth.triggerAttackRelease(noteName, duration * 0.5, Tone.now(), adjustedVolume * 0.7);
+        }, 180);
+      }
+    }
     
-    // Passer à la note suivante (en boucle)
-    currentMidiIndex = (currentMidiIndex + 1) % midiSequence.length;
+    // Passer à la note suivante
+    midiCurrentIndex = (midiCurrentIndex + 1) % midiNotes.length;
+    
+    // Nettoyer le synthé après un délai
+    setTimeout(() => {
+      if (typeof synth.dispose === 'function') {
+        synth.dispose();
+      }
+    }, 3000); // Délai plus long pour permettre aux notes de finir
   } catch (error) {
-    console.error('Erreur lors de la lecture de la note MIDI:', error);
+    console.error('[MIDI PLAY] Erreur lors de la lecture de la note MIDI:', error);
   }
-};
-
-/**
- * Convertit un numéro MIDI en nom de note (format Tone.js)
- * @param midi Le numéro MIDI
- * @returns Le nom de la note (ex: "C4")
- */
-const midiToNoteName = (midi: number): string => {
-  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-  const octave = Math.floor(midi / 12) - 1;
-  const note = noteNames[midi % 12];
-  return `${note}${octave}`;
 };
 
 /**
  * Vérifie si une séquence MIDI est chargée
- * @returns true si une séquence MIDI est disponible
  */
 export const hasMIDISequence = (): boolean => {
-  return midiSequence.length > 0;
+  return midiFileLoaded && midiNotes.length > 0;
 };
 
 /**
- * Nettoie la séquence MIDI actuelle
+ * Efface la séquence MIDI
  */
-export const clearMIDISequence = (): void => {
-  midiSequence = [];
-  currentMidiIndex = 0;
+export const clearMIDISequence = () => {
+  midiNotes = [];
+  midiCurrentIndex = 0;
+  midiFileLoaded = false;
+  // MODIFICATION: Réinitialiser également les sélections
+  midiSelectedInstrumentPreset = MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING;
+  midiSelectedTrackIndex = null;
+  console.log("[MIDI] Séquence MIDI effacée et sélections réinitialisées");
+};
+
+/**
+ * Définit la tonalité pour les notes MIDI et calcule la transposition nécessaire
+ * @param tonality La tonalité à utiliser (ex: "C", "D", "F#", etc.)
+ */
+export const setMIDITonality = (tonality: string) => {
+  // Vérifier que la tonalité est valide
+  const validTonalities = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  const normalizedTonality = tonality.toUpperCase().replace("b", "#");
+  
+  if (!validTonalities.includes(normalizedTonality)) {
+    console.warn(`[MIDI] Tonalité invalide: ${tonality}. Utilisation de la tonalité par défaut (C).`);
+    midiTonality = "C";
+    midiTranspose = 0;
+    return;
+  }
+  
+  // Stocker la nouvelle tonalité
+  midiTonality = normalizedTonality;
+  
+  // Calculer la transposition nécessaire pour passer de C à la tonalité demandée
+  // C est la référence (0), puis chaque demi-ton ajoute 1
+  const tonalityIndex = validTonalities.indexOf(normalizedTonality);
+  midiTranspose = tonalityIndex; // 0 pour C, 1 pour C#, etc.
+  
+  console.log(`[MIDI] Tonalité définie sur ${midiTonality} (transposition: ${midiTranspose} demi-tons)`);
+};
+
+/**
+ * Convertit un numéro MIDI en nom de note (format Tone.js) avec une meilleure précision
+ * et applique la transposition selon la tonalité définie
+ */
+const midiToNoteName = (midi: number): string => {
+  // Appliquer la transposition
+  const transposedMidi = midi + midiTranspose;
+  
+  // Table des noms de notes
+  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  
+  // Calcul de l'octave (MIDI note 60 = C4)
+  const octave = Math.floor((transposedMidi - 12) / 12);
+  
+  // Calcul de la note dans l'octave (0-11)
+  const noteIndex = (transposedMidi - 12) % 12;
+  
+  // Générer le nom de note au format Tone.js
+  return `${noteNames[noteIndex]}${octave}`;
 };
 
 /**
  * Définit le volume pour les notes MIDI
- * @param volume Le niveau de volume (0-1)
  */
-export const setMIDIVolume = (volume: number): void => {
-  midiVolume = Math.min(1, Math.max(0, volume));
+export const setMIDIVolume = (volume: number) => {
+  midiVolume = Math.max(0, Math.min(1, volume));
+  console.log(`[MIDI] Volume défini à ${midiVolume.toFixed(2)}`);
 };
 
 /**
- * Obtient le volume actuel des notes MIDI
- * @returns Le niveau de volume (0-1)
+ * Charge un fichier MIDI et extrait les notes
  */
-export const getMIDIVolume = (): number => {
-  return midiVolume;
-};
-
-/**
- * Charge un fichier MIDI directement (.mid)
- * @param file Le fichier MIDI à charger
- */
-export const loadMIDIFile = async (file: File): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    try {
-      // Vérifier que c'est bien un fichier MIDI
-      if (!file.name.toLowerCase().endsWith('.mid') && !file.name.toLowerCase().endsWith('.midi')) {
-        throw new Error('Le fichier doit être au format MIDI (.mid ou .midi)');
-      }
-
-      // Utiliser FileReader pour lire le fichier
-      const reader = new FileReader();
-      
-      reader.onload = (event) => {
-        try {
-          // Convertir les données en format ArrayBuffer
-          const arrayBuffer = event.target?.result;
-          
-          if (!arrayBuffer) {
-            throw new Error('Échec de lecture du fichier MIDI');
-          }
-          
-          // Utiliser MidiParser pour analyser les données MIDI
-          // @ts-ignore - MidiParser n'a pas de types TypeScript complets
-          const midiData = MidiParser.parse(arrayBuffer);
-          
-          // Stocker les données MIDI brutes
-          rawMidiData = midiData;
-          
-          // Extraire les notes MIDI
-          midiNotes = extractMIDINotes(midiData);
-          
-          if (midiNotes.length === 0) {
-            throw new Error('Aucune note MIDI n\'a été trouvée dans le fichier');
-          }
-          
-          // Stocker les notes dans la séquence pour playback
-          midiSequence = [...midiNotes];
-          currentMidiIndex = 0;
-          
-          console.log(`Fichier MIDI chargé avec succès: ${midiNotes.length} notes`);
-          resolve();
-        } catch (error) {
-          console.error('Erreur lors du traitement du fichier MIDI:', error);
-          reject(error);
-        }
-      };
-      
-      reader.onerror = () => {
-        reject(new Error('Échec de lecture du fichier MIDI'));
-      };
-      
-      // Lire le fichier comme ArrayBuffer
-      reader.readAsArrayBuffer(file);
-    } catch (error) {
-      console.error('Erreur lors du chargement du fichier MIDI:', error);
-      reject(error);
-    }
-  });
-};
-
-/**
- * Extrait les notes MIDI d'un fichier MIDI parsé
- * @param midiData Les données MIDI parsées
- * @returns Un tableau de notes MIDI
- */
-const extractMIDINotes = (midiData: any): number[] => {
-  const notes: number[] = [];
+export const loadMIDIFile = async (file: File): Promise<boolean> => {
+  console.log(`[MIDI LOAD] Démarrage du chargement du fichier MIDI: ${file.name}, taille: ${file.size} octets`);
+  midiNotes = []; // Réinitialiser les notes MIDI
+  midiCurrentIndex = 0;
+  midiFileLoaded = false;
   
   try {
-    // Vérifier la structure des données MIDI
-    if (!midiData || !midiData.track || midiData.track.length === 0) {
-      throw new Error('Format MIDI invalide');
+    // Lire le fichier comme ArrayBuffer
+    const arrayBuffer = await file.arrayBuffer();
+    console.log(`[MIDI LOAD] Fichier lu, taille: ${arrayBuffer.byteLength} octets`);
+    
+    // Convertir en Uint8Array pour l'analyse
+    const midiData = new Uint8Array(arrayBuffer);
+    
+    // Extraction des notes du fichier MIDI
+    console.log(`[MIDI LOAD] Analyse des données MIDI: ${midiData.length} octets`);
+    
+    // Étape 1: Vérifier l'en-tête MIDI
+    if (midiData.length < 14 || 
+        String.fromCharCode.apply(null, Array.from(midiData.slice(0, 4))) !== 'MThd' ||
+        midiData[4] !== 0 || midiData[5] !== 0 || midiData[6] !== 0 || midiData[7] !== 6) {
+      console.error("[MIDI LOAD] Format MIDI invalide", midiData.slice(0, 14));
+      return false;
     }
     
-    // Parcourir les pistes MIDI
-    for (const track of midiData.track) {
-      if (!track.event || !Array.isArray(track.event)) continue;
+    // Récupérer des informations importantes de l'en-tête
+    const format = (midiData[8] << 8) | midiData[9];
+    const numTracks = (midiData[10] << 8) | midiData[11];
+    const timeDivision = (midiData[12] << 8) | midiData[13];
+    
+    console.log(`[MIDI LOAD] Format: ${format}, Pistes: ${numTracks}, Division: ${timeDivision}`);
+    
+    // Étape 2: Parcourir les chunks pour trouver les événements de note
+    let position = 14; // Après l'en-tête MThd
+    const allExtractedNotes: { note: number, track: number, timing: number, velocity: number }[] = [];
+    const channels = new Set<number>();
+    
+    // Statistiques par piste pour identifier les pistes importantes
+    const trackStats: { [key: number]: { noteCount: number, velocitySum: number, highestNote: number, lowestNote: number } } = {};
+    
+    for (let trackIndex = 0; trackIndex < numTracks && position < midiData.length - 4; trackIndex++) {
+      // Initialiser les statistiques pour cette piste
+      trackStats[trackIndex] = {
+        noteCount: 0,
+        velocitySum: 0,
+        highestNote: 0,
+        lowestNote: 127
+      };
       
-      // Parcourir les événements de la piste
-      for (const event of track.event) {
-        // Rechercher les événements de type "noteOn" (0x90)
-        if (event.type === 9 && event.data && event.data.length >= 2) {
-          const noteNumber = event.data[0];
-          const velocity = event.data[1];
+      // Chercher les en-têtes de piste MTrk
+      if (String.fromCharCode.apply(null, Array.from(midiData.slice(position, position + 4))) === 'MTrk') {
+        // Lire la longueur de la piste
+        const trackLength = (midiData[position + 4] << 24) | 
+                           (midiData[position + 5] << 16) | 
+                           (midiData[position + 6] << 8) | 
+                           midiData[position + 7];
+        position += 8; // Avancer après l'en-tête et la longueur
+        
+        console.log(`[MIDI LOAD] Piste ${trackIndex}, longueur: ${trackLength} octets`);
+        
+        // Analyser les événements de la piste
+        let trackPosition = position;
+        let runningStatus = 0;
+        let absoluteTime = 0; // Temps absolu pour cette piste
+        
+        while (trackPosition < position + trackLength) {
+          // Lire le delta time (variable length)
+          let deltaTime = 0;
+          let deltaValue;
           
-          // Ne considérer que les notes avec une vélocité > 0
-          if (velocity > 0) {
-            notes.push(noteNumber);
+          do {
+            deltaValue = midiData[trackPosition++];
+            deltaTime = (deltaTime << 7) | (deltaValue & 0x7F);
+          } while (deltaValue & 0x80 && trackPosition < position + trackLength);
+          
+          // Ajouter le delta time au temps absolu
+          absoluteTime += deltaTime;
+          
+          // Lire le status byte ou utiliser le running status
+          let statusByte = midiData[trackPosition];
+          
+          if (statusByte < 0x80) {
+            // Running status, utiliser le précédent
+            statusByte = runningStatus;
+          } else {
+            // Nouveau status, avancer
+            trackPosition++;
+            runningStatus = statusByte;
+          }
+          
+          // Traiter les événements de note on (0x9n)
+          if ((statusByte & 0xF0) === 0x90) {
+            const channel = statusByte & 0x0F;
+            const noteNumber = midiData[trackPosition++];
+            const velocity = midiData[trackPosition++];
+            
+            // Enregistrer uniquement les notes avec vélocité > 0 (note on réelle)
+            if (velocity > 0 && noteNumber >= 21 && noteNumber <= 108) {
+              // Mettre à jour les statistiques de la piste
+              trackStats[trackIndex].noteCount++;
+              trackStats[trackIndex].velocitySum += velocity;
+              trackStats[trackIndex].highestNote = Math.max(trackStats[trackIndex].highestNote, noteNumber);
+              trackStats[trackIndex].lowestNote = Math.min(trackStats[trackIndex].lowestNote, noteNumber);
+              
+              allExtractedNotes.push({
+                note: noteNumber,
+                track: trackIndex,
+                timing: absoluteTime,
+                velocity: velocity
+              });
+              channels.add(channel);
+            }
+          }
+          // Meta événement (0xFF)
+          else if (statusByte === 0xFF) {
+            const metaType = midiData[trackPosition++];
+            
+            // Lire la longueur des métadonnées (variable length)
+            let metaLength = 0;
+            let metaValue;
+            
+            do {
+              metaValue = midiData[trackPosition++];
+              metaLength = (metaLength << 7) | (metaValue & 0x7F);
+            } while (metaValue & 0x80 && trackPosition < position + trackLength);
+            
+            // Avancer après les métadonnées
+            trackPosition += metaLength;
+          }
+          // Autres événements à 2 octets de données
+          else if ((statusByte & 0xF0) === 0xC0 || (statusByte & 0xF0) === 0xD0) {
+            trackPosition += 1;
+          }
+          // Autres événements à 3 octets
+          else if ((statusByte & 0xF0) <= 0xE0) {
+            trackPosition += 2;
+          }
+          // System Exclusive
+          else if (statusByte === 0xF0 || statusByte === 0xF7) {
+            let sysexLength = 0;
+            let sysexValue;
+            
+            do {
+              sysexValue = midiData[trackPosition++];
+              sysexLength = (sysexLength << 7) | (sysexValue & 0x7F);
+            } while (sysexValue & 0x80 && trackPosition < position + trackLength);
+            
+            trackPosition += sysexLength;
+          }
+          else {
+            // Type d'événement inconnu, avancer d'un octet
+            trackPosition++;
           }
         }
+        
+        // Passer à la piste suivante
+        position += trackLength;
+      } else {
+        // Pas un en-tête valide, avancer
+        position++;
       }
     }
     
-    // Si nous avons trop de notes, en prendre un échantillon représentatif
-    if (notes.length > 100) {
-      const sampledNotes: number[] = [];
-      const step = Math.floor(notes.length / 100);
+    // Analyser les statistiques pour identifier les pistes importantes
+    console.log("[MIDI LOAD] Statistiques des pistes:", trackStats);
+    
+    // Identifier les pistes mélodiques principales (celles avec une bonne amplitude de notes et un nombre raisonnable de notes)
+    const mainTracks: number[] = [];
+    for (const trackIndex in trackStats) {
+      const stats = trackStats[trackIndex];
+      const noteRange = stats.highestNote - stats.lowestNote;
       
-      for (let i = 0; i < 100; i++) {
-        sampledNotes.push(notes[i * step]);
+      // Une piste principale a généralement beaucoup de notes et couvre une bonne plage de notes
+      if (stats.noteCount > 10 && noteRange > 7) {
+        mainTracks.push(parseInt(trackIndex));
       }
-      
-      return sampledNotes;
     }
     
-    return notes;
+    console.log("[MIDI LOAD] Pistes principales identifiées:", mainTracks);
+    
+    // Extraire les notes de ces pistes principales uniquement
+    let extractedNotes: { note: number, track: number, timing: number }[] = [];
+    
+    if (mainTracks.length > 0) {
+      // Cas où nous avons identifié des pistes principales
+      for (const note of allExtractedNotes) {
+        if (mainTracks.includes(note.track)) {
+          extractedNotes.push({
+            note: note.note,
+            track: note.track,
+            timing: note.timing
+          });
+        }
+      }
+    } else {
+      // Si aucune piste principale n'a été identifiée, prendre toutes les notes
+      extractedNotes = allExtractedNotes.map(note => ({
+        note: note.note,
+        track: note.track,
+        timing: note.timing
+      }));
+    }
+    
+    // Vérifier si des notes ont été extraites
+    if (extractedNotes.length > 0) {
+      console.log(`[MIDI LOAD] Extraction réussie: ${extractedNotes.length} notes MIDI trouvées sur les pistes principales`);
+      
+      // Trier les notes par temps (timing) pour garder l'ordre chronologique
+      extractedNotes.sort((a, b) => a.timing - b.timing);
+      
+      // Garder un nombre raisonnable de notes pour éviter les fichiers trop longs
+      if (extractedNotes.length > 300) {
+        midiNotes = extractedNotes.slice(0, 300);
+        console.log(`[MIDI LOAD] Limité à 300 notes sur ${extractedNotes.length}`);
+      } else {
+        midiNotes = extractedNotes;
+      }
+      
+      console.log(`[MIDI LOAD] Notes extraites (premiers 20):`, midiNotes.slice(0, 20));
+      console.log(`[MIDI LOAD] Canaux utilisés:`, Array.from(channels));
+      
+      midiFileLoaded = true;
+      return true;
+    } else {
+      console.warn("[MIDI LOAD] Aucune note n'a été extraite du fichier MIDI");
+      return false;
+    }
   } catch (error) {
-    console.error('Erreur lors de l\'extraction des notes MIDI:', error);
-    return [];
+    console.error("[MIDI LOAD] Erreur lors de l'analyse du fichier MIDI:", error);
+    return false;
   }
-}; 
+};
+
+// MODIFICATION: Nouvelles fonctions pour définir l'instrument et la piste MIDI
+/**
+ * Définit le preset d'instrument MIDI à utiliser.
+ * @param preset La clé du preset d'instrument. Si null, revient au cycle par défaut.
+ */
+export const setMIDIInstrumentPreset = (preset: MIDIInstrumentPresetKey | null) => {
+  if (preset === null || Object.values(MIDI_INSTRUMENT_PRESETS).includes(preset)) {
+    midiSelectedInstrumentPreset = preset || MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING;
+    console.log(`[MIDI] Preset d'instrument défini sur: ${midiSelectedInstrumentPreset}`);
+  } else {
+    console.warn(`[MIDI] Preset d'instrument invalide: ${preset}. Utilisation du cycle par défaut.`);
+    midiSelectedInstrumentPreset = MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING;
+  }
+};
+
+/**
+ * Définit l'index de la piste MIDI à jouer.
+ * @param trackIndex L'index de la piste. Si null, joue les notes des pistes principales (comportement par défaut).
+ */
+export const setMIDITrackIndex = (trackIndex: number | null) => {
+  if (trackIndex === null || (typeof trackIndex === 'number' && trackIndex >= 0)) {
+    midiSelectedTrackIndex = trackIndex;
+    console.log(`[MIDI] Index de piste sélectionné: ${midiSelectedTrackIndex === null ? 'Toutes les pistes principales' : trackIndex}`);
+  } else {
+    console.warn(`[MIDI] Index de piste invalide: ${trackIndex}. Sélection annulée (toutes les pistes principales).`);
+    midiSelectedTrackIndex = null;
+  }
+};
+
+// Vérifie si un son personnalisé est disponible
+export const hasCustomSound = (soundType: CustomSoundType): boolean => {
+  // Check if customSounds contains a non-null value for this sound type
+  const result = customSounds[soundType] !== null && customSounds[soundType] !== undefined;
+  console.log(`[DEBUG CUSTOM SOUND] hasCustomSound(${soundType}): soundExists=${result}, value=`, customSounds[soundType]);
+  
+  // Log more details if there's a problem
+  if (!result) {
+    console.log(`[DEBUG CUSTOM SOUND] customSounds object:`, 
+      Object.entries(customSounds).map(([type, buffer]) => `${type}: ${buffer ? 'loaded' : 'null'}`));
+  }
+  
+  return result;
+};
+
+// Sound for wall collision
+export const playWallSound = (
+  volume: number = 0.3, 
+  useCustom: boolean = false
+): void => {
+  console.log(`[DEBUG WALL SOUND] playWallSound called with volume=${volume}, useCustom=${useCustom}, hasCustomSound('wall')=${hasCustomSound('wall')}`);
+  
+  // Ne rien jouer si les sons standards sont désactivés (à moins qu'on utilise un son custom)
+  if (!standardSoundsEnabled && !useCustom) {
+    console.log(`[DEBUG WALL SOUND] Standard sounds disabled and not using custom sound. Returning.`);
+    return;
+  }
+  
+  if (!audioContext) {
+    console.error('[DEBUG WALL SOUND] No audio context available for wall sound');
+    return;
+  }
+  
+  try {
+    console.log(`[DEBUG WALL SOUND] Using ${useCustom && hasCustomSound('wall') ? 'custom' : 'standard'} wall sound`);
+    
+    // Utiliser le son personnalisé s'il existe et si demandé
+    const soundBuffer = (useCustom && customSounds.wall) ? customSounds.wall : soundCache['bounce'];
+    
+    // Vérifier si le tampon sonore existe
+    if (!soundBuffer) {
+      console.warn(`[DEBUG WALL SOUND] No sound buffer available for wall collision`);
+      return;
+    }
+    
+    console.log(`[DEBUG WALL SOUND] Sound buffer obtained: ${(useCustom && customSounds.wall) ? 'custom' : 'standard'}`);
+    
+    const source = audioContext.createBufferSource();
+    source.buffer = soundBuffer;
+    
+    const gainNode = audioContext.createGain();
+    // Réduire encore davantage le volume en le divisant par 2
+    gainNode.gain.value = Math.min(0.5, Math.max(0.05, volume / 2));
+    console.log(`[DEBUG WALL SOUND] Set gain node value to ${gainNode.gain.value}`);
+    
+    source.connect(gainNode);
+    
+    // Connect to both the audio context destination and recorder if available
+    gainNode.connect(audioContext.destination);
+    
+    // Also connect to recorder destination if available
+    if (recorderDestination) {
+      gainNode.connect(recorderDestination);
+      console.log(`[DEBUG WALL SOUND] Connected to recorder destination`);
+    }
+    
+    console.log(`[DEBUG WALL SOUND] Starting sound playback`);
+    source.start();
+    console.log(`[DEBUG WALL SOUND] Sound playback started successfully`);
+  } catch (e) {
+    console.error(`[DEBUG WALL SOUND] Error playing wall sound:`, e);
+  }
+};

@@ -35,12 +35,15 @@ import {
   disableExtractedNotes,
   resetExtractedNotes,
   stopAllSounds,
-  convertAudioToMIDI,
   playMIDINote,
   hasMIDISequence,
   clearMIDISequence,
   setMIDIVolume,
-  loadMIDIFile
+  loadMIDIFile,
+  setMIDITonality,
+  setMIDIInstrumentPreset,
+  MIDI_INSTRUMENT_PRESETS,
+  MIDIInstrumentPresetKey
 } from './utils/sounds';
 import * as Tone from 'tone';
 
@@ -77,7 +80,7 @@ const physicsPresets = {
 };
 
 // Types de sons disponibles
-const soundTypes = ['bounce', 'grow', 'gameOver'] as const;
+const soundTypes = ['bounce', 'grow', 'gameOver', 'wall'] as const;
 type SoundType = typeof soundTypes[number];
 
 // Définition du type TabType avant le composant
@@ -120,7 +123,8 @@ const GameSelector: React.FC = () => {
   const soundFileRefs = {
     bounce: useRef<HTMLInputElement>(null),
     grow: useRef<HTMLInputElement>(null),
-    gameOver: useRef<HTMLInputElement>(null)
+    gameOver: useRef<HTMLInputElement>(null),
+    wall: useRef<HTMLInputElement>(null)
   };
   
   // Music settings
@@ -169,22 +173,17 @@ const GameSelector: React.FC = () => {
   const extractedMusicRef = useRef<HTMLInputElement>(null);
   
   // Add a state for bounce volume in GameSelector
-  const [bounceVolume, setBounceVolume] = useState<number>(0.7);
+  const [bounceVolume, setBounceVolume] = useState<number>(0.1); // Réduit de 0.3 à 0.1
   // Add a state for progressive sound volume in GameSelector 
   const [progressiveSoundVolume, setProgressiveSoundVolume] = useState<number>(0.7);
   
   // Nouveaux états pour la conversion MIDI
-  const [midiEnabled, setMidiEnabled] = useState<boolean>(false);
+  const [midiEnabled, setMidiEnabled] = useState<boolean>(true); // Activé par défaut
   const [midiFile, setMidiFile] = useState<File | null>(null);
-  const [midiNoteCount, setMidiNoteCount] = useState<number>(24);
-  const midiFileRef = useRef<HTMLInputElement>(null);
-  const [midiConversionInProgress, setMidiConversionInProgress] = useState<boolean>(false);
   const [midiVolume, setMidiVolume] = useState<number>(0.7);
-  
-  // Nouveaux états pour le fichier MIDI
-  const [directMidiFile, setDirectMidiFile] = useState<File | null>(null);
-  const directMidiFileRef = useRef<HTMLInputElement>(null);
-  const [midiLoadingInProgress, setMidiLoadingInProgress] = useState<boolean>(false);
+  const [midiTonality, setMidiTonality] = useState<string>("C");
+  const [midiInstrumentPreset, setMidiInstrumentPreset] = useState<MIDIInstrumentPresetKey>(MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING);
+  const midiFileRef = useRef<HTMLInputElement>(null);
   
   // Initialisation des références pour les éléments d'upload
   useEffect(() => {
@@ -209,6 +208,24 @@ const GameSelector: React.FC = () => {
   const handleStartGame = () => {
     // Arrêter tous les sons avant de démarrer le jeu
     stopAllSounds();
+    
+    // Initialiser le système MIDI si activé
+    if (midiEnabled) {
+      console.log("Initialisation du système MIDI avant le démarrage");
+      // Forcer l'initialisation des notes MIDI par défaut
+      hasMIDISequence();
+      setMIDIVolume(midiVolume);
+      // Appliquer les paramètres d'instrument et de tonalité
+      setMIDIInstrumentPreset(midiInstrumentPreset);
+      setMIDITonality(midiTonality);
+      // Jouer une note MIDI pour initialiser le système
+      try {
+        playMIDINote(midiVolume);
+      } catch (e) {
+        console.error("Erreur lors de l'initialisation du système MIDI:", e);
+      }
+    }
+    
     // Reset game state before starting
     setIsPlaying(false);
     setTimeout(() => {
@@ -331,19 +348,18 @@ const GameSelector: React.FC = () => {
   };
   
   const handleSoundUpload = (e: React.ChangeEvent<HTMLInputElement>, soundType: SoundType) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    
-    const file = files[0]; // On prend seulement le premier fichier
-    
-    // Mettre à jour l'état avec le nouveau fichier son
-    setSoundFiles(prev => ({
-      ...prev,
-      [soundType]: file
-    }));
-    
-    // Charger le son dans le système audio
-    loadCustomSound(file, soundType);
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      
+      // Mise à jour du state
+      setSoundFiles(prev => ({
+        ...prev,
+        [soundType]: file
+      }));
+      
+      // Charger le son dans le système sonore
+      loadCustomSound(file, soundType);
+    }
   };
   
   const triggerFileUpload = () => {
@@ -353,8 +369,8 @@ const GameSelector: React.FC = () => {
   };
   
   const triggerSoundUpload = (soundType: SoundType) => {
-    if (soundFileRefs[soundType].current) {
-      soundFileRefs[soundType].current!.click();
+    if (soundFileRefs[soundType] && soundFileRefs[soundType].current) {
+      soundFileRefs[soundType].current?.click();
     }
   };
   
@@ -378,15 +394,20 @@ const GameSelector: React.FC = () => {
   };
   
   const removeSoundFile = (soundType: SoundType) => {
-    // Supprimer le fichier son
+    // Mise à jour du state
     setSoundFiles(prev => {
-      const updated = { ...prev };
-      delete updated[soundType];
-      return updated;
+      const newFiles = { ...prev };
+      delete newFiles[soundType];
+      return newFiles;
     });
     
-    // Effacer le son personnalisé
+    // Effacer le son dans le système sonore
     clearCustomSound(soundType);
+    
+    // Réinitialiser l'élément input
+    if (soundFileRefs[soundType] && soundFileRefs[soundType].current) {
+      soundFileRefs[soundType].current.value = '';
+    }
   };
   
   const assignImageToBall = (ballIndex: number, imageIndex: number) => {
@@ -767,6 +788,8 @@ const GameSelector: React.FC = () => {
             onVolumeChange={handleVolumeChange}
             midiEnabled={midiEnabled}
             midiVolume={midiVolume}
+            midiTonality={midiTonality}
+            midiInstrumentPreset={midiInstrumentPreset}
           />
         );
 
@@ -861,20 +884,20 @@ const GameSelector: React.FC = () => {
         {/* Add global volume controls here so they're accessible during gameplay */}
         <div className="global-volume-controls" style={{ marginTop: '15px', marginBottom: '20px' }}>
           <div className="volume-control">
-            <label style={{ display: 'block', marginBottom: '5px', color: '#fff', fontSize: '14px' }}>
-              Wall Bounce Volume: {Math.round(bounceVolume * 100)}%
+            <label style={{ display: 'block', marginBottom: '5px', color: '#fff', fontSize: '14px', fontWeight: 'bold' }}>
+              Volume Son Rebond: {Math.round(bounceVolume * 100)}%
             </label>
             <input
               type="range"
               min="0"
               max="1"
-              step="0.1"
+              step="0.05"
               value={bounceVolume}
               onChange={(e) => handleVolumeChange('bounce', parseFloat(e.target.value))}
-              style={{ width: '100%' }}
+              style={{ width: '100%', height: '20px', accentColor: '#ff5722' }}
             />
             <div style={{ fontSize: '11px', color: '#ddd', marginTop: '3px' }}>
-              Controls only the standard bounce sound when balls hit walls
+              Contrôle le volume du son quand les balles touchent les murs
             </div>
           </div>
           
@@ -928,7 +951,8 @@ const GameSelector: React.FC = () => {
           {soundTypes.map(soundType => (
             <div key={soundType} className="sound-item">
               <div className="sound-type">
-                {soundType.charAt(0).toUpperCase() + soundType.slice(1)} Sound:
+                {soundType === 'wall' ? 'Wall Collision Sound:' : 
+                  soundType.charAt(0).toUpperCase() + soundType.slice(1) + ' Sound:'}
               </div>
               <div className="sound-controls">
                 <input
@@ -1557,6 +1581,23 @@ const GameSelector: React.FC = () => {
               ))}
             </div>
           </div>
+          
+          {/* Wall bounce sound volume control */}
+          <div className="control">
+            <label>Volume Son Rebond: {Math.round(bounceVolume * 100)}%</label>
+            <input 
+              type="range" 
+              min="0" 
+              max="1" 
+              step="0.05" 
+              value={bounceVolume}
+              onChange={(e) => {
+                const value = parseFloat(e.target.value);
+                setBounceVolume(value);
+                handleVolumeChange('bounce', value);
+              }}
+            />
+          </div>
         </div>
         
         <div className="effects-section">
@@ -1731,8 +1772,12 @@ const GameSelector: React.FC = () => {
   const handleVolumeChange = (type: 'bounce' | 'progressive', value: number) => {
     if (type === 'bounce') {
       setBounceVolume(value);
+      // Ajouter un log pour déboguer
+      console.log("Volume de rebond changé:", value);
     } else if (type === 'progressive') {
       setProgressiveSoundVolume(value);
+      // Ajouter un log pour déboguer
+      console.log("Volume progressif changé:", value);
     }
   };
 
@@ -1763,12 +1808,11 @@ const GameSelector: React.FC = () => {
     setMidiFile(file);
     
     // Afficher un message de chargement
-    setMidiConversionInProgress(true);
-    alert("Conversion en MIDI en cours... Veuillez patienter pendant l'analyse.");
+    alert("Chargement du fichier MIDI en cours... Veuillez patienter.");
     
     try {
-      // Convertir le fichier audio en séquence MIDI
-      await convertAudioToMIDI(file, midiNoteCount);
+      // Charger le fichier MIDI directement
+      await loadMIDIFile(file);
       
       // Activer le mode MIDI
       if (!midiEnabled) {
@@ -1778,12 +1822,10 @@ const GameSelector: React.FC = () => {
       // Réinitialiser le champ
       e.target.value = '';
       
-      alert("Conversion MIDI terminée avec succès!");
+      alert("Fichier MIDI chargé avec succès!");
     } catch (err) {
-      console.error('Erreur lors de la conversion MIDI:', err);
-      alert("Une erreur s'est produite lors de la conversion. Veuillez réessayer avec un autre fichier audio.");
-    } finally {
-      setMidiConversionInProgress(false);
+      console.error('Erreur lors du chargement du fichier MIDI:', err);
+      alert("Une erreur s'est produite lors du chargement du fichier MIDI. Veuillez vérifier que le format est correct.");
     }
   };
 
@@ -1805,52 +1847,27 @@ const GameSelector: React.FC = () => {
     setMidiVolume(value);
   };
 
-  // Fonction pour gérer l'upload d'un fichier MIDI direct
-  const handleDirectMidiUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    
-    const file = files[0];
-    setDirectMidiFile(file);
-    
-    // Afficher un message de chargement
-    setMidiLoadingInProgress(true);
-    alert("Chargement du fichier MIDI en cours... Veuillez patienter.");
-    
-    try {
-      // Charger le fichier MIDI directement
-      await loadMIDIFile(file);
-      
-      // Activer le mode MIDI
-      if (!midiEnabled) {
-        setMidiEnabled(true);
-      }
-      
-      // Réinitialiser le champ
-      e.target.value = '';
-      
-      alert("Fichier MIDI chargé avec succès!");
-    } catch (err) {
-      console.error('Erreur lors du chargement du fichier MIDI:', err);
-      alert("Une erreur s'est produite lors du chargement du fichier MIDI. Veuillez vérifier que le format est correct.");
-    } finally {
-      setMidiLoadingInProgress(false);
-    }
-  };
-  
-  const triggerDirectMidiUpload = () => {
-    if (directMidiFileRef.current) {
-      directMidiFileRef.current.click();
-    }
+  // Fonction pour gérer le changement d'instrument MIDI
+  const handleMidiInstrumentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value as MIDIInstrumentPresetKey;
+    setMidiInstrumentPreset(value);
+    setMIDIInstrumentPreset(value);
   };
 
-  // Nouveau composant pour afficher la section MIDI
+  // Fonction pour gérer le changement de tonalité MIDI
+  const handleMidiTonalityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    setMidiTonality(value);
+    setMIDITonality(value);
+  };
+
+  // Modifier le composant renderMidiSection pour simplifier l'interface
   const renderMidiSection = () => {
     return (
       <div className="midi-section">
         <h4>MIDI Sound</h4>
         <p className="midi-note">
-          Charger un fichier MIDI ou convertir une chanson pour jouer des notes quand la balle touche un mur
+          Chargez un fichier MIDI qui sera joué à chaque rebond de la balle
         </p>
         
         <div className="music-toggle-container">
@@ -1867,17 +1884,6 @@ const GameSelector: React.FC = () => {
         
         <div className="sequence-settings">
           <label className="slider-label">
-            Nombre de notes MIDI (pour la conversion): {midiNoteCount}
-            <input
-              type="range"
-              min="8"
-              max="48"
-              value={midiNoteCount}
-              onChange={(e) => setMidiNoteCount(parseInt(e.target.value))}
-            />
-          </label>
-          
-          <label className="slider-label">
             Volume MIDI: {Math.round(midiVolume * 100)}%
             <input
               type="range"
@@ -1888,16 +1894,91 @@ const GameSelector: React.FC = () => {
               onChange={handleMidiVolumeChange}
             />
           </label>
+          
+          {/* Wall bounce sound volume control */}
+          <label className="slider-label" style={{ marginTop: '10px' }}>
+            Volume Rebond Mural: {Math.round(bounceVolume * 100)}%
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={bounceVolume}
+              onChange={(e) => {
+                const value = parseFloat(e.target.value);
+                setBounceVolume(value);
+                handleVolumeChange('bounce', value);
+              }}
+            />
+          </label>
+          
+          {/* Sélection de l'instrument MIDI */}
+          <div className="midi-select-container" style={{ marginTop: '10px' }}>
+            <label className="select-label" style={{ display: 'block', marginBottom: '5px' }}>
+              Instrument MIDI:
+              <select
+                value={midiInstrumentPreset}
+                onChange={handleMidiInstrumentChange}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  padding: '8px',
+                  marginTop: '5px',
+                  borderRadius: '4px',
+                  border: '1px solid #ccc'
+                }}
+              >
+                <option value={MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING}>Cycle Automatique</option>
+                <option value={MIDI_INSTRUMENT_PRESETS.MELODIC_MAIN}>Mélodique Principal</option>
+                <option value={MIDI_INSTRUMENT_PRESETS.PAD_STRINGS}>Cordes & Pads</option>
+                <option value={MIDI_INSTRUMENT_PRESETS.PERCUSSIVE}>Percussif</option>
+                <option value={MIDI_INSTRUMENT_PRESETS.METAL_SYNTH}>Synthé Métallique</option>
+                <option value={MIDI_INSTRUMENT_PRESETS.FM_SYNTH}>FM Synthétiseur</option>
+              </select>
+            </label>
+          </div>
+          
+          {/* Sélection de la tonalité MIDI */}
+          <div className="midi-select-container" style={{ marginTop: '10px' }}>
+            <label className="select-label" style={{ display: 'block', marginBottom: '5px' }}>
+              Tonalité MIDI:
+              <select
+                value={midiTonality}
+                onChange={handleMidiTonalityChange}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  padding: '8px',
+                  marginTop: '5px',
+                  borderRadius: '4px',
+                  border: '1px solid #ccc'
+                }}
+              >
+                <option value="C">C (Do)</option>
+                <option value="C#">C# (Do♯)</option>
+                <option value="D">D (Ré)</option>
+                <option value="D#">D# (Ré♯)</option>
+                <option value="E">E (Mi)</option>
+                <option value="F">F (Fa)</option>
+                <option value="F#">F# (Fa♯)</option>
+                <option value="G">G (Sol)</option>
+                <option value="G#">G# (Sol♯)</option>
+                <option value="A">A (La)</option>
+                <option value="A#">A# (La♯)</option>
+                <option value="B">B (Si)</option>
+              </select>
+            </label>
+          </div>
         </div>
         
-        {/* Section pour charger un fichier MIDI directement */}
+        {/* Section pour charger un fichier MIDI */}
         <div className="midi-file-section">
-          <h5>Charger un fichier MIDI directement</h5>
+          <h5>Charger un fichier MIDI</h5>
           
           <input
             type="file"
-            ref={directMidiFileRef}
-            onChange={handleDirectMidiUpload}
+            ref={midiFileRef}
+            onChange={handleMidiUpload}
             accept=".mid,.midi"
             style={{ display: 'none' }}
           />
@@ -1905,22 +1986,19 @@ const GameSelector: React.FC = () => {
           <div className="midi-upload-controls">
             <button
               className="upload-button"
-              onClick={triggerDirectMidiUpload}
-              disabled={midiLoadingInProgress}
+              onClick={triggerMidiUpload}
               style={{
                 backgroundColor: '#4285f4',
                 margin: '10px 0'
               }}
             >
-              {midiLoadingInProgress 
-                ? "Chargement en cours..." 
-                : "Charger un fichier MIDI (.mid)"}
+              Charger un fichier MIDI (.mid)
             </button>
             
-            {directMidiFile && (
+            {midiFile && (
               <div className="midi-file-info" style={{ marginBottom: '15px' }}>
                 <div className="file-name" style={{ fontSize: '14px', marginBottom: '5px' }}>
-                  <strong>Fichier MIDI:</strong> {directMidiFile.name}
+                  <strong>Fichier MIDI:</strong> {midiFile.name}
                 </div>
                 <button
                   onClick={clearMidiFile}
@@ -1941,6 +2019,18 @@ const GameSelector: React.FC = () => {
           </div>
         </div>
         
+        <div className="midi-info" style={{ 
+          marginTop: '15px', 
+          padding: '10px', 
+          backgroundColor: 'rgba(63, 81, 181, 0.1)', 
+          borderRadius: '5px' 
+        }}>
+          <h5 style={{ margin: '0 0 8px 0', fontSize: '14px' }}>Comment ça marche</h5>
+          <p style={{ fontSize: '13px', margin: '0 0 5px 0' }}>
+            Le système jouera une note MIDI chaque fois qu'une balle touche un mur,
+            suivant la séquence de notes de votre fichier MIDI.
+          </p>
+        </div>
       </div>
     );
   };
