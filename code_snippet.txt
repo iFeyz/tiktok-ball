@@ -1,0 +1,21 @@
+            position: newPosition,
+            velocity: { x: newVx, y: newVy },
+            pulseEffect: effectsEnabled ? newPulseEffect : 0,
+            glowSize: effectsEnabled ? newGlowSize : 1,
+            glowOpacity: effectsEnabled ? newGlowOpacity : 0,
+            score: newScore,
+            lastCollisionTime
+          };
+        }
+        
+        // Update game state
+        setGameState(prev => ({
+          ...prev,
+          balls: updatedBalls
+        }));
+        
+        // Draw balls
+        updatedBalls.forEach(ball => {
+          const enhancedBall = ball as EnhancedBall;
+          const pulseEffect = effectsEnabled ? (enhancedBall.pulseEffect || 0) : 0;
+          const glowSize = effectsEnabled ? (enhancedBall.glowSize || 1.5) : 1;
