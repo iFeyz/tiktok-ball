@@ -60,13 +60,21 @@ interface Circle {
   isFlashing: boolean; // Pour l'effet de flash lors du rétrécissement
 }
 
+// D'abord, étendre l'interface Ball pour inclure les propriétés d'image
+interface EnhancedBall extends Ball {
+  image?: HTMLImageElement | null;
+  imageIndex?: number;
+  growing?: boolean;
+  growthRate?: number;
+}
+
 interface CollapsingRotatingCirclesProps extends GameProps {
   gravity?: number;
   bounciness?: number;
   ballSpeed?: number;
   initialCircleCount?: number;
   circleGap?: number;
-  minCircleGap?: number; // Nouvel espace minimum entre les cercles
+  minCircleGap?: number;
   exitSize?: number;
   rotationSpeed?: number;
   ballCount?: number;
@@ -74,26 +82,41 @@ interface CollapsingRotatingCirclesProps extends GameProps {
   shrinkCirclesOnDestroy?: boolean;
   shrinkFactor?: number;
   effectsEnabled?: boolean;
-  progressiveRotationOffset?: number; // Ajouter ce paramètre pour le décalage progressif
-  ballsOnDestroy?: number; // Nombre de balles à créer quand un cercle est détruit
-  baseBallRadius?: number; // Taille du cercle de base
-  exitStyle?: ExitStyle;   // Style des portes de sortie
-  particleStyle?: ParticleStyle; // Style des particules lors de la destruction
-  minCircleRadius?: number; // Nouveau paramètre pour la taille minimale d'un cercle
-  customEndMessage?: string; // Nouveau paramètre pour le message de fin personnalisé
-  showFinalScore?: boolean; // Option pour afficher ou masquer le score final
-  useCustomSounds?: boolean; // Ajouter le support des sons personnalisés
-  customExitSound?: File; // Son personnalisé quand une balle passe une porte
-  maxBallCount?: number; // Nombre maximum de balles dans le jeu
+  progressiveRotationOffset?: number;
+  ballsOnDestroy?: number;
+  baseBallRadius?: number;
+  exitStyle?: ExitStyle;
+  particleStyle?: ParticleStyle;
+  minCircleRadius?: number;
+  customEndMessage?: string;
+  showFinalScore?: boolean;
+  useCustomSounds?: boolean;
+  customExitSound?: File;
+  maxBallCount?: number;
+  // Nouvelles propriétés pour les images personnalisées
+  useCustomImages?: boolean;
+  customImages?: string[];
+  ballImageAssignments?: number[];
+  inheritBallImage?: boolean;  // Option pour hériter de l'image de la balle qui touche la porte
+  growing?: boolean;  // Option pour activer la croissance des balles comme dans GrowingBall
+  growthRate?: number;  // Taux de croissance des balles
+  // Nouvelles propriétés pour personnaliser le texte des cercles restants
+  remainingCirclesPrefix?: string; // Texte personnalisé avant le nombre de cercles restants
+  remainingCirclesBgColor?: string; // Couleur de fond du texte des cercles restants
+  remainingCirclesTextColor?: string; // Couleur du texte des cercles restants
+  // Propriété pour l'enregistrement
+  isRecording?: boolean;
 }
 
 interface CollapsingRotatingCirclesState {
-  balls: Ball[];
+  balls: EnhancedBall[];  // Changé de Ball[] à EnhancedBall[]
   circles: Circle[];
   particles: Particle[];
   score: number;
   gameOver: boolean;
-  totalShrinkFactor: number; // Facteur cumulatif de rétrécissement
+  totalShrinkFactor: number;
+  // Propriété pour suivre quelle balle a touché quelle porte
+  lastBallToTouchCircle?: EnhancedBall | null;
 }
 
 const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({ 
@@ -104,25 +127,38 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   ballSpeed = 5,
   initialCircleCount = 5,
   circleGap = 40,
-  minCircleGap = 15, // Valeur par défaut pour l'espace minimum
-  exitSize = 30, // Angle en degrés
-  rotationSpeed = 0.01, // Vitesse de rotation en radians par frame
+  minCircleGap = 15,
+  exitSize = 30,
+  rotationSpeed = 0.01,
   ballCount = 1,
-  maxBallSpeed = 8, // Vitesse maximale pour limiter les échappées
+  maxBallSpeed = 8,
   shrinkCirclesOnDestroy = true,
-  shrinkFactor = 0.8, // Réduire à 80% à chaque destruction
-  effectsEnabled = true, // Activer par défaut
-  progressiveRotationOffset = 0, // 0% par défaut (pas de décalage)
-  ballsOnDestroy = 0, // Par défaut, pas de balles supplémentaires
-  baseBallRadius = 15, // Taille par défaut du cercle de base
-  exitStyle = ExitStyle.STANDARD, // Style de porte par défaut
-  particleStyle = ParticleStyle.STANDARD, // Style de particules par défaut
-  minCircleRadius = 40, // Taille minimale par défaut d'un cercle
-  customEndMessage = "VICTOIRE !", // Valeur par défaut du message de fin
-  showFinalScore = true, // Afficher le score final par défaut
-  useCustomSounds = false, // Par défaut, utiliser les sons standards
+  shrinkFactor = 0.8,
+  effectsEnabled = true,
+  progressiveRotationOffset = 0,
+  ballsOnDestroy = 0,
+  baseBallRadius = 15,
+  exitStyle = ExitStyle.STANDARD,
+  particleStyle = ParticleStyle.STANDARD,
+  minCircleRadius = 40,
+  customEndMessage = "VICTOIRE !",
+  showFinalScore = true,
+  useCustomSounds = false,
   customExitSound,
-  maxBallCount = 20 // Limite par défaut du nombre de balles
+  maxBallCount = 20,
+  // Ajouter les nouvelles propriétés avec des valeurs par défaut
+  useCustomImages = false,
+  customImages = [],
+  ballImageAssignments = [],
+  inheritBallImage = false,
+  growing = false,
+  growthRate = 0.01,
+  // Valeurs par défaut pour les nouvelles propriétés de texte
+  remainingCirclesPrefix = "Cercles restants",
+  remainingCirclesBgColor = "#ffffff",
+  remainingCirclesTextColor = "#000000",
+  // Propriété pour l'enregistrement
+  isRecording
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
@@ -132,11 +168,42 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
     particles: [],
     score: 0,
     gameOver: false,
-    totalShrinkFactor: 1.0 // Commence à 100% (pas de rétrécissement)
+    totalShrinkFactor: 1.0,
+    lastBallToTouchCircle: null
   });
+  
+  // Référence pour les images chargées
+  const [loadedImages, setLoadedImages] = useState<HTMLImageElement[]>([]);
 
   const exitSizeRad = (exitSize * Math.PI) / 180; // Conversion degrés -> radians
   
+  // Précharger les images si nécessaire
+  useEffect(() => {
+    if (useCustomImages && customImages.length > 0) {
+      const images: HTMLImageElement[] = [];
+      let loadedCount = 0;
+      
+      customImages.forEach((src, index) => {
+        const img = new Image();
+        img.src = src;
+        img.onload = () => {
+          loadedCount++;
+          if (loadedCount === customImages.length) {
+            setLoadedImages(images);
+          }
+        };
+        img.onerror = () => {
+          // En cas d'erreur, augmenter quand même le compteur pour éviter les blocages
+          loadedCount++;
+          if (loadedCount === customImages.length) {
+            setLoadedImages(images.filter(img => img.complete));
+          }
+        };
+        images.push(img);
+      });
+    }
+  }, [useCustomImages, customImages]);
+
   // Fonction pour créer des particules lors de la destruction d'un cercle
   const createDestructionParticles = (centerX: number, centerY: number, circleRadius: number, circleColor: string) => {
     if (!effectsEnabled) return [];
@@ -280,15 +347,45 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   };
 
   const initializeGame = useCallback(() => {
+    // Nettoyer l'animation frame précédente pour éviter les animations concurrentes
+    if (requestRef.current) {
+      cancelAnimationFrame(requestRef.current);
+      requestRef.current = undefined;
+    }
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
 
-    // Créer les balles avec le nouveau baseBallRadius
-    const newBalls: Ball[] = [];
+    // Créer les balles avec images personnalisées si activées
+    const newBalls: EnhancedBall[] = [];
     for (let i = 0; i < ballCount; i++) {
+      // Déterminer si une image doit être assignée à cette balle
+      let ballImage = null;
+      let imageIndex = -1;
+
+      if (useCustomImages && loadedImages.length > 0) {
+        // Si des assignations d'images sont définies, les utiliser
+        if (ballImageAssignments.length > i) {
+          imageIndex = ballImageAssignments[i];
+          
+          // Si l'index est valide, assigner l'image correspondante
+          if (imageIndex >= 0 && imageIndex < loadedImages.length) {
+            ballImage = loadedImages[imageIndex];
+          } else {
+            // Sinon, assignation aléatoire
+            imageIndex = Math.floor(Math.random() * loadedImages.length);
+            ballImage = loadedImages[imageIndex];
+          }
+        } else {
+          // Sans assignation spécifique, choisir aléatoirement
+          imageIndex = Math.floor(Math.random() * loadedImages.length);
+          ballImage = loadedImages[imageIndex];
+        }
+      }
+
       newBalls.push({
         id: generateId(),
         position: { x: centerX, y: centerY },
@@ -298,6 +395,10 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         },
         radius: baseBallRadius,
         color: getRandomPastelColor(),
+        image: ballImage,
+        imageIndex: imageIndex,
+        growing: growing,
+        growthRate: growthRate
       });
     }
 
@@ -339,16 +440,22 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       });
     }
 
+    // Réinitialiser complètement l'état du jeu
     setGameState({
       balls: newBalls,
       circles: newCircles,
-      particles: [],
-      score: 0,
-      gameOver: false,
-      totalShrinkFactor: 1.0
+      particles: [], // S'assurer que les particules sont vides
+      score: 0, // Réinitialiser le score
+      gameOver: false, // Assurer que le jeu n'est pas terminé
+      totalShrinkFactor: 1.0, // Réinitialiser le facteur de rétrécissement
+      lastBallToTouchCircle: null // Réinitialiser la dernière balle
     });
-    playGameStartSound();
-  }, [ballSpeed, initialCircleCount, circleGap, exitSize, rotationSpeed, ballCount, baseBallRadius, progressiveRotationOffset]);
+    
+    // Assurer que le son est joué après la réinitialisation de l'état
+    setTimeout(() => {
+      playGameStartSound();
+    }, 100);
+  }, [ballSpeed, initialCircleCount, circleGap, exitSize, rotationSpeed, ballCount, baseBallRadius, progressiveRotationOffset, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate]);
 
   useEffect(() => {
     if (isPlaying) {
@@ -513,6 +620,12 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
 
       // Mettre à jour les positions des balles et gérer les collisions
       currentBalls = currentBalls.map(ball => {
+        // Appliquer la croissance si activée
+        let newRadius = ball.radius;
+        if (ball.growing && growing) {
+          newRadius += ball.growthRate || growthRate;
+        }
+        
         // Appliquer la gravité
         let newVelocity = applyGravity(ball.velocity, gravity);
         
@@ -523,22 +636,23 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         let newPosition = updatePosition(ball.position, newVelocity);
 
         // Vérifier les collisions avec les bords du canvas
-        if (newPosition.x - ball.radius < 0 || newPosition.x + ball.radius > canvas.width) {
+        if (newPosition.x - newRadius < 0 || newPosition.x + newRadius > canvas.width) {
           newVelocity.x *= -bounciness;
-          newPosition.x = Math.max(ball.radius, Math.min(canvas.width - ball.radius, newPosition.x));
+          newPosition.x = Math.max(newRadius, Math.min(canvas.width - newRadius, newPosition.x));
           playBounceSound(0.3);
         }
         
-        if (newPosition.y - ball.radius < 0 || newPosition.y + ball.radius > canvas.height) {
+        if (newPosition.y - newRadius < 0 || newPosition.y + newRadius > canvas.height) {
           newVelocity.y *= -bounciness;
-          newPosition.y = Math.max(ball.radius, Math.min(canvas.height - ball.radius, newPosition.y));
+          newPosition.y = Math.max(newRadius, Math.min(canvas.height - newRadius, newPosition.y));
           playBounceSound(0.3);
         }
 
         return {
           ...ball,
           position: newPosition,
-          velocity: newVelocity
+          velocity: newVelocity,
+          radius: newRadius
         };
       });
 
@@ -588,6 +702,9 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                 circle.isDestroyed = true;
                 currentScore += 10;
                 
+                // Stocker la balle qui a touché la porte
+                gameState.lastBallToTouchCircle = ball;
+                
                 // Jouer le son de sortie (personnalisé ou standard)
                 if (useCustomSounds && customExitSound) {
                   // Jouer le son personnalisé quand une balle passe une porte
@@ -609,7 +726,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                 
                 // Créer de nouvelles balles si l'option est activée
                 if (ballsOnDestroy > 0) {
-                  const newBalls = createBallsOnDestroy(centerX, centerY, circle.radius);
+                  const newBalls = createBallsOnDestroy(centerX, centerY, circle.radius, ball);
                   currentBalls.push(...newBalls);
                 }
                 
@@ -623,22 +740,35 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                     .filter(c => !c.isDestroyed)
                     .sort((a, b) => a.circleIndex - b.circleIndex);
                   
-                  // Calculer les nouveaux rayons en maintenant un espacement minimum
+                  // Calculer les nouveaux rayons en fonction du rétrécissement global
                   let previousRadius = 0; // Point de départ (centre)
                   
                   activeCirlces.forEach((circle, idx) => {
                     // Calculer le rayon idéal basé sur le rétrécissement global
                     const idealRadius = circle.originalRadius * totalShrinkFactor;
                     
-                    // Calculer le rayon minimum basé sur le rayon précédent et l'espacement minimum
+                    // Calculer le rayon minimum basé sur le rayon précédent et l'espacement minimum défini par l'utilisateur
+                    // Note: si minCircleGap est 0, cela permet aux cercles d'être collés les uns aux autres
                     const minRadiusFromGap = previousRadius + minCircleGap + baseBallRadius;
                     
-                    // Prendre le maximum entre le rayon idéal, le rayon minimum requis, et la taille minimale configurée
-                    const newTargetRadius = Math.max(
-                      idealRadius, 
-                      minRadiusFromGap,
-                      minCircleRadius // Utiliser la taille minimale configurée
-                    );
+                    // Prendre le maximum entre le rayon idéal et la taille minimale configurée
+                    // Si minCircleGap est 0, on n'impose pas de contrainte supplémentaire basée sur l'espacement
+                    let newTargetRadius;
+                    
+                    if (minCircleGap > 0) {
+                      // Si un espacement minimum est demandé, on l'applique
+                      newTargetRadius = Math.max(
+                        idealRadius,
+                        minRadiusFromGap,
+                        minCircleRadius // Utiliser la taille minimale configurée
+                      );
+                    } else {
+                      // Si l'espacement minimum est 0, on ignore la contrainte d'espacement
+                      newTargetRadius = Math.max(
+                        idealRadius,
+                        minCircleRadius // Seulement respecter la taille minimale du cercle
+                      );
+                    }
                     
                     // Définir le nouveau rayon cible et activer le flash
                     circle.targetRadius = newTargetRadius;
@@ -842,28 +972,47 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
 
       // Dessiner les balles
       currentBalls.forEach(ball => {
-        ctx.beginPath();
-        ctx.arc(
-          ball.position.x,
-          ball.position.y,
-          ball.radius,
-          0,
-          Math.PI * 2
-        );
-        ctx.fillStyle = ball.color;
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        // Si la balle a une image et que les images personnalisées sont activées
+        if (useCustomImages && ball.image) {
+          // Dessiner l'image centrée sur la position de la balle, avec la taille correspondant au diamètre
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(ball.position.x, ball.position.y, ball.radius, 0, Math.PI * 2);
+          ctx.closePath();
+          ctx.clip();
+          
+          // Dessiner l'image
+          const size = ball.radius * 2;
+          ctx.drawImage(
+            ball.image,
+            ball.position.x - ball.radius,
+            ball.position.y - ball.radius,
+            size,
+            size
+          );
+          
+          // Ajouter un contour
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.restore();
+        } else {
+          // Dessin standard pour les balles sans image
+          ctx.beginPath();
+          ctx.arc(
+            ball.position.x,
+            ball.position.y,
+            ball.radius,
+            0,
+            Math.PI * 2
+          );
+          ctx.fillStyle = ball.color;
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
       });
-
-      // Afficher le score et le nombre de cercles restants
-      ctx.font = 'bold 20px Arial';
-      ctx.fillStyle = 'white';
-      ctx.textAlign = 'left';
-      ctx.fillText(`Score: ${currentScore}`, 20, 30);
-      ctx.textAlign = 'right';
-      ctx.fillText(`Cercles restants: ${remainingCircles.length}`, canvas.width - 20, 30);
 
       // Afficher un message si le jeu est terminé
       if (isGameOver) {
@@ -871,13 +1020,35 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         ctx.font = 'bold 48px Arial';
         ctx.fillStyle = '#ff7700';
         ctx.fillText(customEndMessage, canvas.width / 2, canvas.height / 2 - 30);
+      }
+      // Sinon afficher le nombre de cercles restants au centre-haut
+      else if (remainingCircles.length > 0) {
+        // Afficher le nombre de cercles restants au centre-haut avec un fond personnalisé
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 20px Arial';
+        const remainingText = `${remainingCirclesPrefix}: ${remainingCircles.length}`;
         
-        // Afficher le score final si l'option est activée
-        if (showFinalScore) {
-          ctx.font = '24px Arial';
-          ctx.fillStyle = 'white';
-          ctx.fillText(`Score final: ${currentScore}`, canvas.width / 2, canvas.height / 2 + 20);
-        }
+        // Mesurer la taille du texte pour créer un fond approprié
+        const textMetrics = ctx.measureText(remainingText);
+        const textWidth = textMetrics.width;
+        const textHeight = 24; // Hauteur du texte (ajustée pour meilleure symétrie)
+        const padding = 10; // Padding autour du texte
+        
+        // Position verticale améliorée
+        const textY = 70; // Position Y du texte (déplacé plus bas comme demandé)
+        
+        // Dessiner le fond
+        ctx.fillStyle = remainingCirclesBgColor;
+        ctx.fillRect(
+          centerX - textWidth/2 - padding, 
+          textY - textHeight/2 - padding, 
+          textWidth + padding*2, 
+          textHeight + padding*2
+        );
+        
+        // Dessiner le texte en respectant sa position verticale
+        ctx.fillStyle = remainingCirclesTextColor;
+        ctx.fillText(remainingText, centerX, textY + textHeight/4); // Ajustement vertical pour centrer le texte
       }
 
       // Mettre à jour l'état du jeu
@@ -904,10 +1075,10 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         requestRef.current = undefined;
       }
     };
-  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound]);
+  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate, remainingCirclesPrefix, remainingCirclesBgColor, remainingCirclesTextColor]);
 
   // Fonction pour créer de nouvelles balles à l'emplacement d'un cercle détruit
-  const createBallsOnDestroy = (centerX: number, centerY: number, circleRadius: number): Ball[] => {
+  const createBallsOnDestroy = (centerX: number, centerY: number, circleRadius: number, sourceBall?: EnhancedBall): EnhancedBall[] => {
     if (ballsOnDestroy <= 0) return [];
     
     // Vérifier le nombre maximal de balles
@@ -917,7 +1088,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
     // Si on a déjà atteint ou dépassé le nombre maximal de balles, ne pas en créer d'autres
     if (maxBallsToCreate <= 0) return [];
     
-    const newBalls: Ball[] = [];
+    const newBalls: EnhancedBall[] = [];
     
     for (let i = 0; i < maxBallsToCreate; i++) {
       // Angle aléatoire pour la direction de la balle
@@ -932,25 +1103,236 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       const velX = Math.cos(angle) * speed;
       const velY = Math.sin(angle) * speed;
       
+      // Déterminer l'image à utiliser
+      let ballImage = null;
+      let imageIndex = -1;
+      
+      // Si l'héritage d'image est activé et qu'une balle source est fournie
+      if (inheritBallImage && sourceBall && sourceBall.image) {
+        ballImage = sourceBall.image;
+        imageIndex = sourceBall.imageIndex || -1;
+      } 
+      // Sinon, utiliser une image aléatoire si les images personnalisées sont activées
+      else if (useCustomImages && loadedImages.length > 0) {
+        imageIndex = Math.floor(Math.random() * loadedImages.length);
+        ballImage = loadedImages[imageIndex];
+      }
+      
       newBalls.push({
         id: generateId(),
         position: { x: posX, y: posY },
         velocity: { x: velX, y: velY },
         radius: baseBallRadius,
-        color: getRandomPastelColor()
+        color: getRandomPastelColor(),
+        image: ballImage,
+        imageIndex: imageIndex,
+        growing: growing,
+        growthRate: growthRate
       });
     }
     
     return newBalls;
   };
 
+  // Now modify the canvas drawing code to center the score text
+  // Update where the score is drawn in the animate function (around line 583 in the file)
+  // Replace:
+  // ctx.font = 'bold 20px Arial';
+  // ctx.fillStyle = 'white';
+  // ctx.textAlign = 'center';
+  // ctx.fillText(`Score: ${currentScore}`, centerX, 30);
+  // With nothing (remove it completely)
+
+  // Also add the following state for recording functionality near the beginning of the component
+  const [isRecordingState, setIsRecordingState] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<BlobPart[]>([]);
+
+  // Add a useEffect to handle the props.isRecording value if it's passed from the parent
+  useEffect(() => {
+    if (isRecording !== undefined) {
+      if (isRecording && !isRecordingState) {
+        startRecording();
+      } else if (!isRecording && isRecordingState) {
+        stopRecording();
+      }
+    }
+  }, [isRecording, isRecordingState]);
+
+  // Add an audio context reference for recording
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+
+  // Add recording functions
+  const startRecording = () => {
+    if (!canvasRef.current) return;
+    
+    recordedChunksRef.current = [];
+    
+    // Créer le flux vidéo à partir du canvas
+    const videoStream = canvasRef.current.captureStream(30); // 30 FPS
+    
+    // Initialiser l'AudioContext pour la capture audio si ce n'est pas déjà fait
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    
+    // Créer un nœud destination pour le flux audio
+    if (audioContextRef.current && !audioDestinationRef.current) {
+      audioDestinationRef.current = audioContextRef.current.createMediaStreamDestination();
+      
+      // Créer un oscillateur temporaire juste pour garantir qu'il y a un flux audio
+      // Cela peut être remplacé par une connexion plus sophistiquée selon votre système audio
+      const oscillator = audioContextRef.current.createOscillator();
+      oscillator.frequency.value = 0; // Fréquence 0 pour ne pas entendre l'oscillateur
+      oscillator.connect(audioDestinationRef.current);
+      oscillator.start();
+      
+      // Note: Pour une intégration réelle avec le système audio du jeu, 
+      // vous devriez connecter vos sources audio au audioDestinationRef.current
+    }
+    
+    // Combiner flux audio et vidéo si disponible
+    let streamToRecord = videoStream;
+    if (audioDestinationRef.current) {
+      const audioStream = audioDestinationRef.current.stream;
+      const audioTracks = audioStream.getAudioTracks();
+      
+      // Ajouter les pistes audio au flux vidéo
+      audioTracks.forEach(track => {
+        videoStream.addTrack(track);
+      });
+      
+      streamToRecord = videoStream;
+    }
+    
+    // Créer le MediaRecorder avec le flux combiné
+    try {
+      const mediaRecorder = new MediaRecorder(streamToRecord, {
+        mimeType: 'video/webm; codecs=vp9,opus'
+      });
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          recordedChunksRef.current.push(e.data);
+        }
+      };
+      
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, {
+          type: 'video/webm'
+        });
+        
+        // Create download link
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        document.body.appendChild(a);
+        a.style.display = 'none';
+        a.href = url;
+        a.download = 'cercles-game-with-audio.webm';
+        a.click();
+        
+        // Clean up
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      };
+      
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecordingState(true);
+      
+      console.log("Enregistrement démarré avec audio!");
+    } catch (error) {
+      console.error("Erreur lors de la création du MediaRecorder:", error);
+      
+      // Fallback à l'enregistrement vidéo uniquement en cas d'erreur
+      try {
+        const mediaRecorder = new MediaRecorder(videoStream, {
+          mimeType: 'video/webm;codecs=vp9'
+        });
+        
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            recordedChunksRef.current.push(e.data);
+          }
+        };
+        
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(recordedChunksRef.current, {
+            type: 'video/webm'
+          });
+          
+          // Create download link
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          document.body.appendChild(a);
+          a.style.display = 'none';
+          a.href = url;
+          a.download = 'cercles-game-video-only.webm';
+          a.click();
+          
+          // Clean up
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+        };
+        
+        mediaRecorderRef.current = mediaRecorder;
+        mediaRecorder.start();
+        setIsRecordingState(true);
+        
+        console.log("Fallback: Enregistrement démarré (vidéo uniquement)");
+      } catch (fallbackError) {
+        console.error("Erreur avec le fallback:", fallbackError);
+      }
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecordingState) {
+      mediaRecorderRef.current.stop();
+      setIsRecordingState(false);
+      
+      // Arrêter et nettoyer l'oscillateur si nécessaire
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(e => console.error("Erreur lors de la fermeture du contexte audio:", e));
+        audioContextRef.current = null;
+        audioDestinationRef.current = null;
+      }
+      
+      console.log("Enregistrement arrêté");
+    }
+  };
+
   return (
-    <canvas
-      ref={canvasRef}
-      width={800}
-      height={600}
-      style={{ backgroundColor: '#111' }}
-    />
+    <div className="tiktok-game-wrapper">
+      <canvas
+        ref={canvasRef}
+        width={450}
+        height={800}
+        style={{ backgroundColor: '#111' }}
+      />
+      {/* Message for recording status */}
+      {isRecordingState && (
+        <div 
+          style={{ 
+            position: 'absolute', 
+            top: '10px', 
+            right: '10px', 
+            backgroundColor: 'rgba(255, 0, 0, 0.7)', 
+            color: 'white', 
+            padding: '5px 10px', 
+            borderRadius: '20px',
+            fontSize: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px'
+          }}
+        >
+          <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: 'red', animation: 'pulse 1s infinite' }}></div>
+          REC
+        </div>
+      )}
+    </div>
   );
 };
 

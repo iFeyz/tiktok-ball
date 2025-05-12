@@ -353,6 +353,15 @@ const GameSelector: React.FC = () => {
   const handleGameEnd = () => {
     setIsPlaying(false);
   };
+
+  const handleBackToMenu = () => {
+    // Arrêter le jeu d'abord
+    stopAllSounds();
+    setIsPlaying(false);
+    
+    // Retourner au menu principal en réinitialisant le jeu sélectionné
+    setSelectedGame(null);
+  };
   
   const handleGravityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setGravity(parseFloat(e.target.value));
@@ -859,10 +868,27 @@ const GameSelector: React.FC = () => {
     setStandardSoundsEnabled(!standardSoundsEnabled);
   };
   
+  // Corriger les erreurs de lint
+  // Ajouter des états pour les nouvelles propriétés de texte
+  const [remainingCirclesPrefix, setRemainingCirclesPrefix] = useState<string>("Cercles restants");
+  const [remainingCirclesBgColor, setRemainingCirclesBgColor] = useState<string>("#ffffff");
+  const [remainingCirclesTextColor, setRemainingCirclesTextColor] = useState<string>("#000000");
+
+  // Variable pour gérer l'utilisation de sons personnalisés pour les cercles
+  const [useCirclesCustomSounds, setUseCirclesCustomSounds] = useState<boolean>(false);
+
+  // Add state for recording
+  const [isRecording, setIsRecording] = useState<boolean>(false);
+
+  // Add a function to toggle recording
+  const toggleRecording = () => {
+    setIsRecording(!isRecording);
+  };
+
+  // Corriger la fonction renderGame
   const renderGame = () => {
     switch (selectedGame) {
       case GameType.GROWING_BALL:
-        // Utilisez le spread operator pour passer toutes les props nécessaires
         return (
           <GrowingBall
             isPlaying={isPlaying}
@@ -871,7 +897,6 @@ const GameSelector: React.FC = () => {
             growthRate={growthRate}
             bounciness={bounciness}
             ballSpeed={ballSpeed}
-            ballCount={ballCount}
             initialBallCount={ballCount}
             effectsEnabled={effectsEnabled}
             ballCollisionsEnabled={ballCollisionsEnabled}
@@ -881,11 +906,12 @@ const GameSelector: React.FC = () => {
             customImages={customImages}
             ballImageAssignments={ballImageAssignments}
             useCustomSounds={useCustomSounds}
-            customBallSounds={{}} // Pas encore implémenté correctement
+            customBallSounds={{}}
             musicEnabled={musicEnabled}
             ballMusicAssignments={ballMusicAssignments}
             backgroundMusicEnabled={backgroundMusicEnabled}
             progressiveSoundEnabled={progressiveSoundEnabled}
+            maxBallSpeed={maxBallSpeed}
             onBallCollision={(volume: number) => {
               if (progressiveSoundEnabled) {
                 playNextProgressiveSoundPart(volume);
@@ -900,6 +926,7 @@ const GameSelector: React.FC = () => {
             midiVolume={midiVolume}
             midiTonality={midiTonality}
             midiInstrumentPreset={midiInstrumentPreset}
+            ballCount={ballCount}
           />
         );
 
@@ -937,9 +964,22 @@ const GameSelector: React.FC = () => {
             minCircleRadius={minCircleRadius}
             customEndMessage={customEndMessage}
             showFinalScore={showFinalScore}
-            useCustomSounds={useCustomSounds}
+            useCustomSounds={useCirclesCustomSounds}
             customExitSound={customExitSound || undefined}
             maxBallCount={maxBallCount}
+            // Ajouter les nouvelles propriétés pour les images
+            useCustomImages={useRotatingCirclesCustomImages}
+            customImages={rotatingCirclesImageFiles}
+            ballImageAssignments={rotatingCirclesBallImageAssignments}
+            inheritBallImage={inheritBallImage}
+            growing={rotatingCirclesGrowing}
+            growthRate={rotatingCirclesGrowthRate}
+            // Ajouter les nouvelles propriétés pour le texte
+            remainingCirclesPrefix={remainingCirclesPrefix}
+            remainingCirclesBgColor={remainingCirclesBgColor}
+            remainingCirclesTextColor={remainingCirclesTextColor}
+            // Ajouter la propriété pour l'enregistrement
+            isRecording={isRecording}
           />
         );
 
@@ -999,18 +1039,27 @@ const GameSelector: React.FC = () => {
       <>
         <div className="game-controls-sidebar">
           {!isPlaying ? (
-            <button 
-              className="control-button start"
-              onClick={() => {
-                if (selectedGame) {
-                  handleStartGame();
-                } else {
-                  console.error("Aucun jeu sélectionné");
-                }
-              }}
-            >
-              Démarrer
-            </button>
+            <>
+              <button 
+                className="control-button start"
+                onClick={() => {
+                  if (selectedGame) {
+                    handleStartGame();
+                  } else {
+                    console.error("Aucun jeu sélectionné");
+                  }
+                }}
+              >
+                Démarrer
+              </button>
+              <button 
+                className="control-button back"
+                onClick={handleBackToMenu}
+                style={{ marginTop: '10px', backgroundColor: '#555' }}
+              >
+                Retour au menu
+              </button>
+            </>
           ) : (
             <>
               <button 
@@ -1025,63 +1074,97 @@ const GameSelector: React.FC = () => {
               >
                 Réinitialiser
               </button>
+              <button 
+                className="control-button back"
+                onClick={handleBackToMenu}
+                style={{ marginTop: '10px', backgroundColor: '#555' }}
+              >
+                Retour au menu
+              </button>
+              
+              {/* Bouton d'enregistrement */}
+              <button 
+                className={`control-button record ${isRecording ? 'recording' : ''}`}
+                onClick={toggleRecording}
+                style={{
+                  background: isRecording ? '#ff4444' : '#333',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '5px',
+                  marginTop: '10px'
+                }}
+              >
+                <div style={{ 
+                  width: '10px', 
+                  height: '10px', 
+                  borderRadius: '50%', 
+                  backgroundColor: isRecording ? 'white' : 'red',
+                  animation: isRecording ? 'pulse 1s infinite' : 'none'
+                }}></div>
+                {isRecording ? 'Arrêter l\'enregistrement' : 'Enregistrer'}
+              </button>
             </>
-          )}
-          
-          {/* Ajout d'un bouton pour retourner à la sélection de jeu */}
-          {selectedGame && !isPlaying && (
-            <button 
-              className="control-button back"
-              onClick={() => setSelectedGame(null)}
-              style={{
-                marginTop: '10px',
-                backgroundColor: '#555'
-              }}
-            >
-              Retour à la sélection
-            </button>
           )}
         </div>
         
-        {/* Add global volume controls here so they're accessible during gameplay */}
-        <div className="global-volume-controls" style={{ marginTop: '15px', marginBottom: '20px' }}>
-          <div className="volume-control">
-            <label style={{ display: 'block', marginBottom: '5px', color: '#fff', fontSize: '14px', fontWeight: 'bold' }}>
-              Volume Son Rebond: {Math.round(bounceVolume * 100)}%
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={bounceVolume}
-              onChange={(e) => handleVolumeChange('bounce', parseFloat(e.target.value))}
-              style={{ width: '100%', height: '20px', accentColor: '#ff5722' }}
-            />
-            <div style={{ fontSize: '11px', color: '#ddd', marginTop: '3px' }}>
-              Contrôle le volume du son quand les balles touchent les murs
+        {/* Display the game */}
+        <div className="game-display">
+          {renderGame()}
+        </div>
+        
+        {/* Display appropriate settings based on game type */}
+        <div className="game-settings-panel">
+          <div className="settings-header">
+            <h3>Paramètres</h3>
+            <div className="game-tabs">
+              <button 
+                className={`tab-button ${activeTab === 'physics' ? 'active' : ''}`}
+                onClick={() => handleTabChange('physics')}
+              >
+                Physique
+              </button>
+              <button 
+                className={`tab-button ${activeTab === 'effects' ? 'active' : ''}`}
+                onClick={() => handleTabChange('effects')}
+              >
+                Effets
+              </button>
+              <button 
+                className={`tab-button ${activeTab === 'images' ? 'active' : ''}`}
+                onClick={() => handleTabChange('images')}
+              >
+                Images
+              </button>
+              <button 
+                className={`tab-button ${activeTab === 'sounds' ? 'active' : ''}`}
+                onClick={() => handleTabChange('sounds')}
+              >
+                Sons
+              </button>
+              <button 
+                className={`tab-button ${activeTab === 'music' ? 'active' : ''}`}
+                onClick={() => handleTabChange('music')}
+              >
+                Musique
+              </button>
+              <button 
+                className={`tab-button ${activeTab === 'sequence' ? 'active' : ''}`}
+                onClick={() => handleTabChange('sequence')}
+              >
+                Séquence
+              </button>
+              <button 
+                className={`tab-button ${activeTab === 'midi' ? 'active' : ''}`}
+                onClick={() => handleTabChange('midi')}
+              >
+                MIDI
+              </button>
             </div>
           </div>
-          
-          {progressiveSoundEnabled && hasProgressiveSound() && (
-            <div className="volume-control" style={{ marginTop: '10px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', color: '#fff', fontSize: '14px' }}>
-                Progressive Sound: {Math.round(progressiveSoundVolume * 100)}%
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.1"
-                value={progressiveSoundVolume}
-                onChange={(e) => handleVolumeChange('progressive', parseFloat(e.target.value))}
-                style={{ width: '100%' }}
-              />
-              <div style={{ fontSize: '11px', color: '#ddd', marginTop: '3px' }}>
-                Controls volume of progressive sound segments during collisions
-              </div>
-            </div>
-          )}
+          <div className="settings-content">
+            {renderGameOptions()}
+          </div>
         </div>
       </>
     );
@@ -2204,38 +2287,32 @@ const GameSelector: React.FC = () => {
     );
   };
   
-  // Fonction pour afficher les paramètres spécifiques à CollapsingRotatingCircles
+  // Mettre à jour la fonction renderCollapsingRotatingCirclesSettings pour corriger l'erreur des deux attributs value
   const renderCollapsingRotatingCirclesSettings = () => {
-    if (selectedGame !== GameType.COLLAPSING_ROTATING_CIRCLES || isPlaying) {
-      return null;
-    }
-    
     return (
-      <div className="rotating-circles-settings">
-        <h4>Paramètres des Cercles Rotatifs</h4>
-        
+      <div className="game-settings">
         <div className="control">
-          <label>Taille de la balle: {baseBallRadius}px</label>
+          <label>Balle (rayon en pixels): {baseBallRadius}</label>
           <input 
             type="range" 
-            min="5" 
+            min="1" 
             max="30" 
             step="1" 
             value={baseBallRadius}
             onChange={handleBaseBallRadiusChange}
           />
           <div className="control-hint">
-            Définit la taille de base des balles qui traversent les cercles
+            Ajuste la taille de la balle qui navigue entre les cercles
           </div>
         </div>
         
         <div className="control">
-          <label>Taille minimale des cercles: {minCircleRadius}px</label>
+          <label>Taille minimale du cercle (pixels): {minCircleRadius}</label>
           <input 
             type="range" 
-            min="40" 
+            min="1" 
             max="150" 
-            step="1" 
+            step="5" 
             value={minCircleRadius}
             onChange={handleMinCircleRadiusChange}
           />
@@ -2248,97 +2325,49 @@ const GameSelector: React.FC = () => {
           <label>Nombre de cercles: {initialCircleCount}</label>
           <input 
             type="range" 
-            min="2" 
+            min="1" 
             max="2000" 
             step="1" 
             value={initialCircleCount}
             onChange={handleInitialCircleCountChange}
           />
+          <div className="control-hint">
+            Plus il y a de cercles, plus le jeu devient difficile
+          </div>
         </div>
         
         <div className="control">
-          <label>Espace entre les cercles: {circleGap}px</label>
+          <label>Écart entre les cercles (pixels): {circleGap}</label>
           <input 
             type="range" 
-            min="15" 
+            min="1" 
             max="100" 
             step="5" 
             value={circleGap}
             onChange={handleCircleGapChange}
           />
+          <div className="control-hint">
+            Détermine l'espacement entre les cercles concentriques
+          </div>
         </div>
         
         <div className="control">
-          <label>Espace minimum entre cercles: {minCircleGap}px</label>
+          <label>Écart minimum entre cercles (pixels): {minCircleGap}</label>
           <input 
             type="range" 
-            min="5" 
+            min="0" 
             max="50" 
             step="1" 
             value={minCircleGap}
             onChange={handleMinCircleGapChange}
           />
           <div className="control-hint">
-            Espace minimum préservé même après rétrécissement (évite le chevauchement)
+            Définit l'espacement minimum entre les cercles après rétrécissement
           </div>
         </div>
         
         <div className="control">
-          <label>Taille de la porte: {exitSize}°</label>
-          <input 
-            type="range" 
-            min="5" 
-            max="180" 
-            step="5" 
-            value={exitSize}
-            onChange={handleExitSizeChange}
-          />
-        </div>
-        
-        <div className="control">
-          <label>Vitesse de rotation: {rotationSpeed.toFixed(3)}</label>
-          <input 
-            type="range" 
-            min="0.001" 
-            max="0.1" 
-            step="0.001" 
-            value={rotationSpeed}
-            onChange={handleRotationSpeedChange}
-          />
-        </div>
-        
-        <div className="control">
-          <label>Décalage progressif: {progressiveRotationOffset}%</label>
-          <input 
-            type="range" 
-            min="-20" 
-            max="20" 
-            step="1" 
-            value={progressiveRotationOffset}
-            onChange={handleProgressiveRotationOffsetChange}
-          />
-          <div className="control-hint">
-            Crée un motif en spirale en décalant chaque cercle et sa vitesse de rotation (-20% à +20%, 0% = tous alignés)
-          </div>
-        </div>
-        
-        <div className="control">
-          <label>Balles créées par destruction: {ballsOnDestroy}</label>
-          <input 
-            type="range" 
-            min="0" 
-            max="5" 
-            step="1" 
-            value={ballsOnDestroy}
-            onChange={handleBallsOnDestroyChange}
-          />
-          <div className="control-hint">
-            Nombre de balles à créer lorsqu'un cercle est détruit (0 = aucune)
-          </div>
-        </div>
-        
-        <div className="control">
-          <label>Nombre maximum de balles: {maxBallCount}</label>
+          <label>Limite maximum de balles: {maxBallCount}</label>
           <input 
             type="range" 
             min="5" 
@@ -2474,6 +2503,193 @@ const GameSelector: React.FC = () => {
             <div className="control-hint">
               Détermine si le score final sera affiché sous le message de fin
             </div>
+          </div>
+        </div>
+        
+        {/* Ajouter les nouveaux contrôles pour la personnalisation du texte */}
+        <div className="text-customization-section" style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
+          <h5>Personnalisation de l'affichage</h5>
+          
+          <div className="control">
+            <label>Texte des cercles restants:</label>
+            <input 
+              type="text" 
+              value={remainingCirclesPrefix}
+              onChange={(e) => setRemainingCirclesPrefix(e.target.value)}
+              style={{ 
+                width: '100%', 
+                padding: '8px', 
+                borderRadius: '4px', 
+                border: '1px solid #555',
+                backgroundColor: '#333',
+                color: 'white',
+                marginTop: '5px'
+              }}
+              placeholder="Texte affiché avant le nombre de cercles restants"
+            />
+            <div className="control-hint">
+              Personnalise le texte affiché avant le nombre de cercles restants
+            </div>
+          </div>
+          
+          <div className="control">
+            <label>Couleur de fond:</label>
+            <div className="color-picker-container">
+              <input 
+                type="color" 
+                value={remainingCirclesBgColor}
+                onChange={(e) => setRemainingCirclesBgColor(e.target.value)}
+                style={{ 
+                  width: '40px', 
+                  height: '40px',
+                  border: 'none',
+                  padding: '0',
+                  background: 'none'
+                }}
+              />
+              <input 
+                type="text" 
+                value={remainingCirclesBgColor}
+                onChange={(e) => setRemainingCirclesBgColor(e.target.value)}
+                style={{ 
+                  width: '100px', 
+                  marginLeft: '10px',
+                  padding: '5px',
+                  borderRadius: '4px',
+                  border: '1px solid #555',
+                  backgroundColor: '#333',
+                  color: 'white'
+                }}
+              />
+            </div>
+            <div className="control-hint">
+              Couleur de fond du texte des cercles restants
+            </div>
+          </div>
+          
+          <div className="control">
+            <label>Couleur du texte:</label>
+            <div className="color-picker-container">
+              <input 
+                type="color" 
+                value={remainingCirclesTextColor}
+                onChange={(e) => setRemainingCirclesTextColor(e.target.value)}
+                style={{ 
+                  width: '40px', 
+                  height: '40px',
+                  border: 'none',
+                  padding: '0',
+                  background: 'none'
+                }}
+              />
+              <input 
+                type="text" 
+                value={remainingCirclesTextColor}
+                onChange={(e) => setRemainingCirclesTextColor(e.target.value)}
+                style={{ 
+                  width: '100px', 
+                  marginLeft: '10px',
+                  padding: '5px',
+                  borderRadius: '4px',
+                  border: '1px solid #555',
+                  backgroundColor: '#333',
+                  color: 'white'
+                }}
+              />
+            </div>
+            <div className="control-hint">
+              Couleur du texte pour l'affichage des cercles restants
+            </div>
+          </div>
+          
+          {/* Aperçu du texte */}
+          <div className="text-preview" style={{ 
+            marginTop: '15px', 
+            padding: '10px',
+            borderRadius: '4px',
+            border: '1px solid #555',
+            textAlign: 'center'
+          }}>
+            <div style={{
+              display: 'inline-block',
+              padding: '8px 12px',
+              borderRadius: '4px',
+              backgroundColor: remainingCirclesBgColor,
+              color: remainingCirclesTextColor,
+              fontWeight: 'bold',
+              fontSize: '16px'
+            }}>
+              {remainingCirclesPrefix}: 5
+            </div>
+            <div className="control-hint">
+              Aperçu du texte des cercles restants
+            </div>
+          </div>
+        </div>
+        
+        {/* Sons personnalisés */}
+        {renderCirclesCustomSounds()}
+        
+        {/* Images personnalisées */}
+        {renderRotatingCirclesImageSettings()}
+
+        <div className="control">
+          <label>Taille de la porte de sortie (degrés): {exitSize}</label>
+          <input 
+            type="range" 
+            min="5" 
+            max="180" 
+            step="5" 
+            value={exitSize}
+            onChange={handleExitSizeChange}
+          />
+          <div className="control-hint">
+            La taille de l'ouverture dans chaque cercle
+          </div>
+        </div>
+
+        <div className="control">
+          <label>Balles créées à la destruction: {ballsOnDestroy}</label>
+          <input 
+            type="range" 
+            min="0" 
+            max="10" 
+            step="1" 
+            value={ballsOnDestroy}
+            onChange={handleBallsOnDestroyChange}
+          />
+          <div className="control-hint">
+            Nombre de balles créées lorsqu'un cercle est détruit (0 pour désactiver)
+          </div>
+        </div>
+
+        <div className="control">
+          <label>Décalage progressif de rotation: {progressiveRotationOffset}%</label>
+          <input 
+            type="range" 
+            min="-20" 
+            max="20" 
+            step="1" 
+            value={progressiveRotationOffset}
+            onChange={handleProgressiveRotationOffsetChange}
+          />
+          <div className="control-hint">
+            Décale la rotation de chaque cercle d'un pourcentage progressif (-20% à +20%)
+          </div>
+        </div>
+
+        <div className="control">
+          <label>Vitesse de rotation: {rotationSpeed.toFixed(3)}</label>
+          <input 
+            type="range" 
+            min="0.001" 
+            max="0.1" 
+            step="0.001" 
+            value={rotationSpeed}
+            onChange={handleRotationSpeedChange}
+          />
+          <div className="control-hint">
+            Détermine la vitesse de rotation des cercles
           </div>
         </div>
       </div>
@@ -2624,6 +2840,235 @@ const GameSelector: React.FC = () => {
             )}
           </div>
         </div>
+      </div>
+    );
+  };
+
+  // Ajouter des variables d'état pour les images personnalisées et l'héritage d'image
+  const [useRotatingCirclesCustomImages, setUseRotatingCirclesCustomImages] = useState<boolean>(false);
+  const [rotatingCirclesImageFiles, setRotatingCirclesImageFiles] = useState<string[]>([]);
+  const [rotatingCirclesBallImageAssignments, setRotatingCirclesBallImageAssignments] = useState<number[]>([]);
+  const [inheritBallImage, setInheritBallImage] = useState<boolean>(false);
+  const [rotatingCirclesGrowing, setRotatingCirclesGrowing] = useState<boolean>(false);
+  const [rotatingCirclesGrowthRate, setRotatingCirclesGrowthRate] = useState<number>(0.01);
+
+  // Ajouter des références pour les fichiers d'image
+  const rotatingCirclesImageInputRef = useRef<HTMLInputElement>(null);
+
+  // Fonctions pour gérer les images personnalisées pour les cercles rotatifs
+  const triggerRotatingCirclesImageUpload = () => {
+    if (rotatingCirclesImageInputRef.current) {
+      rotatingCirclesImageInputRef.current.click();
+    }
+  };
+
+  const handleRotatingCirclesImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const newImageFiles = [...rotatingCirclesImageFiles];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.type.startsWith('image/')) {
+        const url = URL.createObjectURL(file);
+        newImageFiles.push(url);
+      }
+    }
+
+    setRotatingCirclesImageFiles(newImageFiles);
+    if (e.target.value) e.target.value = ''; // Reset input
+  };
+
+  const removeRotatingCirclesImage = (index: number) => {
+    const newImageFiles = [...rotatingCirclesImageFiles];
+    // Libérer l'URL avant de la supprimer pour éviter les fuites de mémoire
+    URL.revokeObjectURL(newImageFiles[index]);
+    newImageFiles.splice(index, 1);
+    setRotatingCirclesImageFiles(newImageFiles);
+
+    // Mettre à jour les assignations d'images si nécessaire
+    const newAssignments = [...rotatingCirclesBallImageAssignments];
+    for (let i = 0; i < newAssignments.length; i++) {
+      if (newAssignments[i] === index) {
+        // Réinitialiser l'assignation
+        newAssignments[i] = -1;
+      } else if (newAssignments[i] > index) {
+        // Décaler les indices supérieurs
+        newAssignments[i]--;
+      }
+    }
+    setRotatingCirclesBallImageAssignments(newAssignments);
+  };
+
+  // Fonction pour assigner une image à une balle pour les cercles rotatifs
+  const assignRotatingCirclesImageToBall = (ballIndex: number, imageIndex: number) => {
+    const newAssignments = [...rotatingCirclesBallImageAssignments];
+    while (newAssignments.length <= ballIndex) {
+      newAssignments.push(-1); // -1 pour indiquer pas d'image assignée
+    }
+    newAssignments[ballIndex] = imageIndex;
+    setRotatingCirclesBallImageAssignments(newAssignments);
+  };
+
+  // Gérer l'option d'héritage d'image
+  const handleInheritImageToggle = () => {
+    setInheritBallImage(!inheritBallImage);
+  };
+
+  // Gérer l'option de croissance
+  const handleRotatingCirclesGrowingToggle = () => {
+    setRotatingCirclesGrowing(!rotatingCirclesGrowing);
+  };
+
+  // Gérer le taux de croissance
+  const handleRotatingCirclesGrowthRateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setRotatingCirclesGrowthRate(parseFloat(e.target.value));
+  };
+
+  // Fonction pour gérer l'activation des images personnalisées pour les cercles rotatifs
+  const handleRotatingCirclesCustomImagesToggle = () => {
+    setUseRotatingCirclesCustomImages(!useRotatingCirclesCustomImages);
+  };
+
+  // Ajouter la fonction pour rendre les contrôles des images personnalisées pour les cercles rotatifs
+  const renderRotatingCirclesImageSettings = () => {
+    return (
+      <div className="custom-images-section">
+        <h4>Images personnalisées pour les balles</h4>
+        
+        <div className="control toggle-control">
+          <label className="toggle-label">
+            Utiliser des images personnalisées:
+            <button 
+              className={`toggle-button ${useRotatingCirclesCustomImages ? 'active' : ''}`}
+              onClick={handleRotatingCirclesCustomImagesToggle}
+            >
+              {useRotatingCirclesCustomImages ? 'ON' : 'OFF'}
+            </button>
+          </label>
+          <div className="control-hint">
+            Permet d'utiliser des images de votre choix pour les balles
+          </div>
+        </div>
+        
+        {useRotatingCirclesCustomImages && (
+          <>
+            <div className="control">
+              <label>Images des balles:</label>
+              <div className="file-upload-container">
+                <input 
+                  type="file" 
+                  ref={rotatingCirclesImageInputRef}
+                  onChange={handleRotatingCirclesImageUpload}
+                  multiple
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                />
+                <button 
+                  className="upload-button"
+                  onClick={triggerRotatingCirclesImageUpload}
+                >
+                  {rotatingCirclesImageFiles.length > 0 ? 'Ajouter d\'autres images' : 'Ajouter des images'}
+                </button>
+              </div>
+              
+              {rotatingCirclesImageFiles.length > 0 && (
+                <div className="image-thumbnails">
+                  {rotatingCirclesImageFiles.map((url, index) => (
+                    <div key={index} className="image-thumbnail-container">
+                      <img 
+                        src={url} 
+                        alt={`Thumbnail ${index}`} 
+                        className="image-thumbnail"
+                      />
+                      <button 
+                        className="remove-image-button"
+                        onClick={() => removeRotatingCirclesImage(index)}
+                      >
+                        X
+                      </button>
+                      <div className="image-index">{index + 1}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              <div className="control-hint">
+                Formats acceptés: JPEG, PNG, GIF, SVG
+              </div>
+            </div>
+            
+            {ballCount > 1 && rotatingCirclesImageFiles.length > 0 && (
+              <div className="control">
+                <label>Assigner des images aux balles:</label>
+                <div className="ball-assignments">
+                  {Array.from({ length: ballCount }).map((_, ballIndex) => (
+                    <div key={ballIndex} className="ball-assignment">
+                      <span>Balle {ballIndex + 1}:</span>
+                      <select
+                        value={rotatingCirclesBallImageAssignments[ballIndex] || -1}
+                        onChange={(e) => assignRotatingCirclesImageToBall(ballIndex, parseInt(e.target.value))}
+                      >
+                        <option value="-1">Aléatoire</option>
+                        {rotatingCirclesImageFiles.map((_, imageIndex) => (
+                          <option key={imageIndex} value={imageIndex}>Image {imageIndex + 1}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className="control toggle-control">
+              <label className="toggle-label">
+                Hériter de l'image parent:
+                <button 
+                  className={`toggle-button ${inheritBallImage ? 'active' : ''}`}
+                  onClick={handleInheritImageToggle}
+                >
+                  {inheritBallImage ? 'ON' : 'OFF'}
+                </button>
+              </label>
+              <div className="control-hint">
+                Les nouvelles balles créées héritent de l'image de la balle qui a touché la porte
+              </div>
+            </div>
+            
+            <div className="control toggle-control">
+              <label className="toggle-label">
+                Croissance des balles:
+                <button 
+                  className={`toggle-button ${rotatingCirclesGrowing ? 'active' : ''}`}
+                  onClick={handleRotatingCirclesGrowingToggle}
+                >
+                  {rotatingCirclesGrowing ? 'ON' : 'OFF'}
+                </button>
+              </label>
+              <div className="control-hint">
+                Active la croissance progressive des balles comme dans le jeu Balles Rebondissantes
+              </div>
+            </div>
+            
+            {rotatingCirclesGrowing && (
+              <div className="control">
+                <label>Taux de croissance: {rotatingCirclesGrowthRate.toFixed(3)}</label>
+                <input 
+                  type="range" 
+                  min="0.001" 
+                  max="0.05" 
+                  step="0.001" 
+                  value={rotatingCirclesGrowthRate}
+                  onChange={handleRotatingCirclesGrowthRateChange}
+                />
+                <div className="control-hint">
+                  Vitesse à laquelle les balles grossissent au fil du temps
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     );
   };

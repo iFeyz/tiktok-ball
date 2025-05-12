@@ -1712,3 +1712,26 @@ main {
 .rotating-circles-settings input[type="range"] {
   background: linear-gradient(to right, #3498db, #9b59b6);
 }
+
+/* Add a new class for the TikTok game container */
+.tiktok-game-wrapper {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 100;
+  width: 450px;
+  height: 800px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0 auto;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+}
+
+/* Add animation for the recording indicator */
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.3; }
+  100% { opacity: 1; }
+}
