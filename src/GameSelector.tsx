@@ -240,14 +240,6 @@ const GameSelector: React.FC = () => {
   // Ajouter un référence pour le son personnalisé de porte de sortie
   const exitSoundFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Ajouter l'état pour indiquer si les nouvelles balles héritent de l'image
-  const [inheritBallImage, setInheritBallImage] = useState(false);
-
-  // Fonction pour gérer le changement de l'option d'héritage d'image
-  const handleInheritBallImageToggle = () => {
-    setInheritBallImage(!inheritBallImage);
-  };
-
   // Fonctions pour gérer les changements de style
   const handleExitStyleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setExitStyle(e.target.value as ExitStyle);
@@ -948,10 +940,6 @@ const GameSelector: React.FC = () => {
             useCustomSounds={useCustomSounds}
             customExitSound={customExitSound || undefined}
             maxBallCount={maxBallCount}
-            useCustomImages={useCustomImages}
-            customImages={uploadedImagePreviews}
-            ballImageAssignments={ballImageAssignments}
-            inheritBallImage={inheritBallImage}
           />
         );
 
@@ -2640,99 +2628,6 @@ const GameSelector: React.FC = () => {
     );
   };
 
-  // Ajouter section pour les images dans l'onglet images, spécifique à CollapsingRotatingCircles
-  const renderCollapsingCirclesImagesSection = () => {
-    if (selectedGame !== GameType.COLLAPSING_ROTATING_CIRCLES) {
-      return null;
-    }
-
-    return (
-      <div className="collapsing-circles-images-section">
-        <h4>Images pour les Balles des Cercles Rotatifs</h4>
-        
-        <div className="toggle-control">
-          <label className="toggle-label">
-            Utiliser des images personnalisées:
-            <button
-              className={`toggle-button ${useCustomImages ? 'active' : ''}`}
-              onClick={handleCustomImagesToggle}
-            >
-              {useCustomImages ? 'ON' : 'OFF'}
-            </button>
-          </label>
-        </div>
-        
-        {useCustomImages && (
-          <>
-            <div className="images-container">
-              <input
-                type="file"
-                ref={fileInputRef}
-                style={{ display: 'none' }}
-                onChange={handleFileUpload}
-                accept="image/*"
-                multiple
-              />
-              <button 
-                className="upload-button"
-                onClick={triggerFileUpload}
-              >
-                📤 Ajouter des images
-              </button>
-              
-              <div className="images-preview">
-                {uploadedImagePreviews.map((src, index) => (
-                  <div key={index} className="image-preview-item">
-                    <img 
-                      src={src} 
-                      alt={`Image ${index + 1}`} 
-                      className="preview-thumbnail"
-                    />
-                    <button 
-                      className="remove-button"
-                      onClick={() => removeImage(index)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-            
-            <div className="toggle-control">
-              <label className="toggle-label">
-                Assigner des images aux balles:
-                <button
-                  className={`toggle-button ${showImageAssignment ? 'active' : ''}`}
-                  onClick={handleImageAssignmentToggle}
-                >
-                  {showImageAssignment ? 'ON' : 'OFF'}
-                </button>
-              </label>
-            </div>
-            
-            <div className="toggle-control">
-              <label className="toggle-label">
-                Nouvelles balles héritent de l'image parent:
-                <button
-                  className={`toggle-button ${inheritBallImage ? 'active' : ''}`}
-                  onClick={handleInheritBallImageToggle}
-                >
-                  {inheritBallImage ? 'ON' : 'OFF'}
-                </button>
-              </label>
-              <div className="control-hint">
-                Si activé, les nouvelles balles créées lors de la destruction d'un cercle hériteront de l'image de la balle qui a touché le cercle.
-              </div>
-            </div>
-            
-            {showImageAssignment && renderBallImageAssignment()}
-          </>
-        )}
-      </div>
-    );
-  };
-
   // Render function for the main component with sidebar layout
   return (
     <div className="app-container">
@@ -2880,13 +2775,72 @@ const GameSelector: React.FC = () => {
         </div>
         
             <div className={`control-panel ${activeTab === 'images' ? 'active' : ''}`}>
-        <div className="images-section">
-          <h4>Images Personnalisées</h4>
+        <div className="custom-images-section">
+                <h4>Images Personnalisées</h4>
+          <div className="image-toggle-container">
+            <label className="toggle-label">
+                    Utiliser des images personnalisées:
+              <button 
+                className={`toggle-button ${useCustomImages ? 'active' : ''}`}
+                onClick={handleCustomImagesToggle}
+              >
+                {useCustomImages ? 'ON' : 'OFF'}
+              </button>
+            </label>
+          </div>
           
-          {/* Ajouter cette ligne pour inclure la section des images pour les cercles rotatifs */}
-          {renderCollapsingCirclesImagesSection()}
+          <div className={`image-upload-container ${useCustomImages ? 'active' : ''}`}>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              accept="image/*"
+              style={{ display: 'none' }}
+            />
+            <button
+              className="upload-button"
+              onClick={triggerFileUpload}
+              disabled={!useCustomImages}
+            >
+                    Télécharger Image
+            </button>
+            
+            {uploadedImagePreviews.length > 0 && (
+                <div className="image-previews">
+                  {uploadedImagePreviews.map((src, index) => (
+                        <div className="image-preview-item" key={index}>
+                          <img src={src} alt={`Image ${index}`} />
+                      <button 
+                        className="remove-image" 
+                        onClick={() => removeImage(index)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            
+                  <div className="upload-info">
+                    Formats supportés: PNG, JPG, GIF<br />
+                    Taille recommandée: 128×128px
+                  </div>
+                </div>
+                
+                {useCustomImages && uploadedImagePreviews.length > 0 && (
+                <div className="assignment-toggle-container">
+                  <button
+                    className={`assignment-toggle-button ${showImageAssignment ? 'active' : ''}`}
+                    onClick={handleImageAssignmentToggle}
+                  >
+                      {showImageAssignment ? 'Masquer les assignations' : 'Assigner des images aux balles'}
+                  </button>
+                    
+                    {showImageAssignment && renderBallImageAssignment()}
+                </div>
+              )}
+          </div>
         </div>
-      </div>
         
             <div className={`control-panel ${activeTab === 'sounds' ? 'active' : ''}`}>
         {renderCustomSounds()}

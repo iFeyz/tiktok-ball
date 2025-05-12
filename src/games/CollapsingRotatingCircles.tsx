@@ -85,10 +85,6 @@ interface CollapsingRotatingCirclesProps extends GameProps {
   useCustomSounds?: boolean; // Ajouter le support des sons personnalisés
   customExitSound?: File; // Son personnalisé quand une balle passe une porte
   maxBallCount?: number; // Nombre maximum de balles dans le jeu
-  useCustomImages?: boolean; // Utiliser des images personnalisées pour les balles
-  customImages?: string[]; // Liste des URLs des images personnalisées
-  ballImageAssignments?: number[]; // Assignation d'images aux balles
-  inheritBallImage?: boolean; // Les nouvelles balles héritent de l'image de leur balle parent
 }
 
 interface CollapsingRotatingCirclesState {
@@ -126,11 +122,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   showFinalScore = true, // Afficher le score final par défaut
   useCustomSounds = false, // Par défaut, utiliser les sons standards
   customExitSound,
-  maxBallCount = 20, // Limite par défaut du nombre de balles
-  useCustomImages = false, // Par défaut, ne pas utiliser des images personnalisées
-  customImages = [], // Liste vide par défaut des images personnalisées
-  ballImageAssignments = [], // Liste vide par défaut des assignments d'images
-  inheritBallImage = false, // Par défaut, les nouvelles balles ne héritent pas de l'image de leur balle parent
+  maxBallCount = 20 // Limite par défaut du nombre de balles
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
@@ -140,38 +132,8 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
     particles: [],
     score: 0,
     gameOver: false,
-    totalShrinkFactor: 1
+    totalShrinkFactor: 1.0 // Commence à 100% (pas de rétrécissement)
   });
-  
-  // Variables pour le son personnalisé
-  const [loadedImages, setLoadedImages] = useState<HTMLImageElement[]>([]);
-
-  // Fonction pour jouer un son au démarrage du jeu
-  const playGameStartSound = () => {
-    // Fonction vide pour éviter l'erreur de linter
-    // Cette fonction pourrait être implémentée pour jouer un son au démarrage
-  };
-
-  // Chargement des images quand useCustomImages ou customImages changent
-  useEffect(() => {
-    const loadImages = async () => {
-      if (useCustomImages && customImages.length > 0) {
-        const newLoadedImages: HTMLImageElement[] = [];
-        for (const imageUrl of customImages) {
-          const img = new Image();
-          img.src = imageUrl;
-          await new Promise<void>((resolve) => {
-            img.onload = () => resolve();
-            img.onerror = () => resolve(); // Résoudre même en cas d'erreur
-          });
-          newLoadedImages.push(img);
-        }
-        setLoadedImages(newLoadedImages);
-      }
-    };
-    
-    loadImages();
-  }, [useCustomImages, customImages]);
 
   const exitSizeRad = (exitSize * Math.PI) / 180; // Conversion degrés -> radians
   
@@ -327,29 +289,6 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
     // Créer les balles avec le nouveau baseBallRadius
     const newBalls: Ball[] = [];
     for (let i = 0; i < ballCount; i++) {
-      // Assigner une image à la balle si disponible
-      let image = null;
-      let imageIndex = -1;
-      
-      if (useCustomImages && loadedImages.length > 0) {
-        // Si une assignation spécifique existe pour cette balle
-        if (ballImageAssignments && ballImageAssignments.length > i) {
-          imageIndex = ballImageAssignments[i];
-          // Si l'index est valide, utiliser cette image
-          if (imageIndex >= 0 && imageIndex < loadedImages.length) {
-            image = loadedImages[imageIndex];
-          } else {
-            // Sinon, assigner une image aléatoire
-            imageIndex = Math.floor(Math.random() * loadedImages.length);
-            image = loadedImages[imageIndex];
-          }
-        } else {
-          // Pas d'assignation, utiliser une image aléatoire
-          imageIndex = Math.floor(Math.random() * loadedImages.length);
-          image = loadedImages[imageIndex];
-        }
-      }
-      
       newBalls.push({
         id: generateId(),
         position: { x: centerX, y: centerY },
@@ -359,8 +298,6 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         },
         radius: baseBallRadius,
         color: getRandomPastelColor(),
-        image,
-        imageIndex
       });
     }
 
@@ -408,11 +345,10 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       particles: [],
       score: 0,
       gameOver: false,
-      totalShrinkFactor: 1
+      totalShrinkFactor: 1.0
     });
-
     playGameStartSound();
-  }, [ballSpeed, initialCircleCount, circleGap, exitSize, rotationSpeed, ballCount, baseBallRadius, progressiveRotationOffset, useCustomImages, loadedImages, ballImageAssignments]);
+  }, [ballSpeed, initialCircleCount, circleGap, exitSize, rotationSpeed, ballCount, baseBallRadius, progressiveRotationOffset]);
 
   useEffect(() => {
     if (isPlaying) {
@@ -673,7 +609,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                 
                 // Créer de nouvelles balles si l'option est activée
                 if (ballsOnDestroy > 0) {
-                  const newBalls = createBallsOnDestroy(centerX, centerY, circle.radius, ball);
+                  const newBalls = createBallsOnDestroy(centerX, centerY, circle.radius);
                   currentBalls.push(...newBalls);
                 }
                 
@@ -907,61 +843,18 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       // Dessiner les balles
       currentBalls.forEach(ball => {
         ctx.beginPath();
-        
-        // Si la balle a une image, la dessiner
-        if (useCustomImages && ball.image) {
-          try {
-            // Dessiner l'image au lieu d'un cercle
-            const imgSize = ball.radius * 2;
-            ctx.drawImage(
-              ball.image,
-              ball.position.x - ball.radius, 
-              ball.position.y - ball.radius,
-              imgSize,
-              imgSize
-            );
-            
-            // Ajouter un contour à l'image pour une meilleure visibilité
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.lineWidth = 2;
-            ctx.arc(
-              ball.position.x,
-              ball.position.y,
-              ball.radius,
-              0,
-              Math.PI * 2
-            );
-            ctx.stroke();
-          } catch (err) {
-            // En cas d'erreur (image non chargée), fallback sur cercle coloré
-            ctx.arc(
-              ball.position.x,
-              ball.position.y,
-              ball.radius,
-              0,
-              Math.PI * 2
-            );
-            ctx.fillStyle = ball.color;
-            ctx.fill();
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-          }
-        } else {
-          // Dessiner normalement si pas d'image
-          ctx.arc(
-            ball.position.x,
-            ball.position.y,
-            ball.radius,
-            0,
-            Math.PI * 2
-          );
-          ctx.fillStyle = ball.color;
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-          ctx.lineWidth = 2;
-          ctx.stroke();
-        }
+        ctx.arc(
+          ball.position.x,
+          ball.position.y,
+          ball.radius,
+          0,
+          Math.PI * 2
+        );
+        ctx.fillStyle = ball.color;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
       });
 
       // Afficher le score et le nombre de cercles restants
@@ -1014,7 +907,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound]);
 
   // Fonction pour créer de nouvelles balles à l'emplacement d'un cercle détruit
-  const createBallsOnDestroy = (centerX: number, centerY: number, circleRadius: number, parentBall?: Ball): Ball[] => {
+  const createBallsOnDestroy = (centerX: number, centerY: number, circleRadius: number): Ball[] => {
     if (ballsOnDestroy <= 0) return [];
     
     // Vérifier le nombre maximal de balles
@@ -1039,28 +932,12 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       const velX = Math.cos(angle) * speed;
       const velY = Math.sin(angle) * speed;
       
-      // Déterminer l'image à utiliser
-      let image = null;
-      let imageIndex = -1;
-      
-      if (useCustomImages && inheritBallImage && parentBall && parentBall.image) {
-        // Hériter l'image de la balle parent si l'option est activée
-        image = parentBall.image;
-        imageIndex = parentBall.imageIndex || -1;
-      } else if (useCustomImages && loadedImages.length > 0) {
-        // Sinon utiliser une image aléatoire si disponible
-        imageIndex = Math.floor(Math.random() * loadedImages.length);
-        image = loadedImages[imageIndex];
-      }
-      
       newBalls.push({
         id: generateId(),
         position: { x: posX, y: posY },
         velocity: { x: velX, y: velY },
         radius: baseBallRadius,
-        color: parentBall ? parentBall.color : getRandomPastelColor(),
-        image,
-        imageIndex
+        color: getRandomPastelColor()
       });
     }
     
