@@ -73,10 +73,12 @@ class GameRecorder {
   }
 
   /**
-   * Connect an audio node to the recording
+   * Connect an audio source node to the recorder
    * @param sourceNode The audio node to connect
    */
   public connectAudioSource(sourceNode: AudioNode): void {
+    console.log('Attempting to connect audio source to recorder');
+    
     if (this.audioDestination) {
       try {
         // Check if source node belongs to the same context
@@ -85,11 +87,21 @@ class GameRecorder {
           return;
         }
         
+        // Ensure the connection doesn't already exist to avoid feedback loops
+        try {
+          // Temporarily disconnect and reconnect to ensure clean connection
+          sourceNode.disconnect(this.audioDestination);
+        } catch (e) {
+          // Ignore disconnection errors - node might not be connected yet
+        }
+        
         sourceNode.connect(this.audioDestination);
-        console.log('Audio source connected to recorder');
+        console.log('Audio source connected to recorder successfully');
       } catch (err) {
         console.warn('Failed to connect audio source:', err);
       }
+    } else {
+      console.warn('Audio destination not available, cannot connect source');
     }
   }
 
@@ -129,6 +141,12 @@ class GameRecorder {
         
         if (options.captureAudio && this.audioDestination) {
           try {
+            // Double-check audio context is running
+            if (this.audioContext && this.audioContext.state === 'suspended') {
+              console.log('Resuming audio context before starting recording');
+              await this.audioContext.resume();
+            }
+            
             // Use the audio destination stream (system audio)
             const audioStream = this.audioDestination.stream;
             
@@ -141,7 +159,7 @@ class GameRecorder {
                 ...videoTracks,
                 ...audioTracks
               ]);
-              console.log('Created composite stream with system audio');
+              console.log(`Created composite stream with ${videoTracks.length} video tracks and ${audioTracks.length} audio tracks`);
             } else {
               console.warn('No audio tracks available, recording without audio');
               compositeStream = videoStream;
@@ -158,6 +176,7 @@ class GameRecorder {
 
         // Get supported MIME type
         const mimeType = this.getSupportedMimeType();
+        console.log(`Using MIME type: ${mimeType || 'default'}`);
         
         // Create media recorder options
         const recorderOptions: MediaRecorderOptions = {};
@@ -172,6 +191,7 @@ class GameRecorder {
 
         // Create the media recorder
         this.mediaRecorder = new MediaRecorder(compositeStream, recorderOptions);
+        console.log(`MediaRecorder created with options:`, recorderOptions);
 
         // Handle data available event
         this.mediaRecorder.ondataavailable = (event) => {
@@ -199,7 +219,8 @@ class GameRecorder {
         // Set up automatic stop after max duration
         setTimeout(() => {
           if (this.isRecording) {
-            this.stopRecording();
+            console.log(`Max recording duration (${this.maxDuration}ms) reached, stopping automatically`);
+            this.stopRecording().catch(err => console.error('Error auto-stopping recording:', err));
           }
         }, this.maxDuration);
 

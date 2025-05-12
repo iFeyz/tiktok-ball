@@ -406,7 +406,7 @@ const GameSelector: React.FC = () => {
     
     // Réinitialiser l'élément input
     if (soundFileRefs[soundType] && soundFileRefs[soundType].current) {
-      soundFileRefs[soundType].current.value = '';
+      soundFileRefs[soundType].current!.value = '';
     }
   };
   

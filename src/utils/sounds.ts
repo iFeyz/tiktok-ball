@@ -67,6 +67,7 @@ let customSounds: { bounce: AudioBuffer | null, grow: AudioBuffer | null, gameOv
 // Point d'envoi pour l'enregistrement audio
 let masterGainNode: GainNode | null = null;
 let recorderDestination: MediaStreamAudioDestinationNode | null = null;
+let connectedNodes: Set<AudioNode> = new Set(); // Track connected nodes to avoid duplicates
 
 // Nouvelles variables pour l'activation des sons standards
 let standardSoundsEnabled = true;
@@ -120,6 +121,11 @@ export type MIDIInstrumentPresetKey = typeof MIDI_INSTRUMENT_PRESETS[keyof typeo
 let midiSelectedInstrumentPreset: MIDIInstrumentPresetKey = MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING; // Instrument sélectionné
 let midiSelectedTrackIndex: number | null = null; // Piste MIDI sélectionnée (null pour toutes les pistes principales)
 
+// Add these variables at the top of the file with other declarations
+let backgroundMusicOscillator: OscillatorNode | null = null;
+let backgroundMusicGainNode: GainNode | null = null;
+let backgroundMusicPlaying = false;
+
 /**
  * Récupère le contexte audio actuel ou en crée un nouveau si nécessaire
  * @returns Le contexte audio actuel
@@ -161,16 +167,49 @@ export const connectToRecorder = (destination: MediaStreamAudioDestinationNode):
     return;
   }
   
+  // Store the destination
   recorderDestination = destination;
-  console.log('Audio connected to recorder destination');
   
-  // Connect master gain node to recorder
+  // Connect master gain node to recorder if available
   if (masterGainNode && recorderDestination) {
     try {
-      masterGainNode.connect(recorderDestination);
-      console.log('Master gain node connected to recorder');
+      // Check if already connected to avoid duplicate connections
+      if (!connectedNodes.has(masterGainNode)) {
+        masterGainNode.connect(recorderDestination);
+        connectedNodes.add(masterGainNode);
+        console.log('Master gain node connected to recorder destination');
+      } else {
+        console.log('Master gain node already connected to recorder');
+      }
     } catch (err) {
       console.error('Failed to connect to recorder:', err);
+    }
+  }
+  
+  // Also connect progressive sound nodes if they exist
+  if (progressiveGainNode && recorderDestination) {
+    try {
+      if (!connectedNodes.has(progressiveGainNode)) {
+        progressiveGainNode.connect(recorderDestination);
+        connectedNodes.add(progressiveGainNode);
+        console.log('Progressive gain node connected to recorder destination');
+      }
+    } catch (err) {
+      console.error('Failed to connect progressive sound to recorder:', err);
+    }
+  }
+  
+  console.log('Audio fully connected to recorder destination');
+};
+
+// Helper function to ensure audio nodes are connected to recorder
+const connectNodeToRecorder = (node: AudioNode): void => {
+  if (recorderDestination && !connectedNodes.has(node)) {
+    try {
+      node.connect(recorderDestination);
+      connectedNodes.add(node);
+    } catch (err) {
+      console.error('Failed to connect node to recorder:', err);
     }
   }
 };
@@ -184,7 +223,18 @@ export const playBounceSound = (
   // Ne rien jouer si les sons standards sont désactivés (à moins qu'on utilise un son custom)
   if (!standardSoundsEnabled && !useCustom) return;
   
-  if (!audioContext) return;
+  if (!audioContext) {
+    console.warn('Cannot play sound: audio context not initialized');
+    return;
+  }
+  
+  // Resume audio context if it's suspended (browser policy)
+  if (audioContext.state === 'suspended') {
+    console.log('Resuming audio context for sound playback');
+    audioContext.resume().catch(err => {
+      console.error('Failed to resume audio context:', err);
+    });
+  }
   
   try {
     console.log(`Playing ${soundType} sound with volume ${volume}, useCustom=${useCustom}`);
@@ -207,10 +257,15 @@ export const playBounceSound = (
     
     source.connect(gainNode);
     
-    // Connect to both the audio context destination and recorder if available
-    gainNode.connect(audioContext.destination);
+    // Connect to the master gain node for consistent volume control
+    if (masterGainNode) {
+      gainNode.connect(masterGainNode);
+    } else {
+      // Fallback: connect directly to destination
+      gainNode.connect(audioContext.destination);
+    }
     
-    // Also connect to recorder destination if available
+    // Also connect directly to recorder destination for reliable recording
     if (recorderDestination) {
       gainNode.connect(recorderDestination);
     }
@@ -478,33 +533,50 @@ export const playRandomSound = () => {
 
 // Initialize Tone.js
 export const initSound = (): void => {
-  if (!isSoundInitialized) {
-    try {
-      audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      
-      initSoundWithContext(audioContext);
-    } catch (e) {
-      console.error("Web Audio API not supported.", e);
-    }
+  if (isSoundInitialized) {
+    console.log('Sound system already initialized');
+    return;
+  }
+  
+  try {
+    console.log('Initializing audio context for sound system');
+    // Use AudioContext with fallback for older browsers
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    audioContext = new AudioContextClass();
+    
+    // Initialize the system with the new context
+    initSoundWithContext(audioContext);
+  } catch (e) {
+    console.error('Failed to initialize audio context:', e);
   }
 };
 
-// Initialize sound system with a specific context
+/**
+ * Initialize sound system with an existing audio context
+ */
 const initSoundWithContext = (context: AudioContext): void => {
+  if (isSoundInitialized) {
+    console.log('Sound system already initialized');
+    return;
+  }
+  
   try {
-    // Create master gain node for routing to recorder
+    // Set up master gain node to control all audio
     masterGainNode = context.createGain();
-    masterGainNode.gain.value = 1.0;
+    masterGainNode.gain.value = 1.0; // Full volume initially
     masterGainNode.connect(context.destination);
     
+    // Load default sounds
+    loadDefaultSounds().then(() => {
+      console.log('Default sounds loaded successfully');
+    }).catch(err => {
+      console.error('Failed to load default sounds:', err);
+    });
+    
     isSoundInitialized = true;
-    
-    // Précharger les sons par défaut
-    loadDefaultSounds();
-    
-    console.log('Sound system initialized with audio context', context);
+    console.log('Sound system initialized successfully');
   } catch (e) {
-    console.error("Failed to initialize sound system:", e);
+    console.error('Failed to initialize sound system:', e);
   }
 };
 
@@ -782,6 +854,20 @@ export const playBackgroundMusic = (): void => {
   if (backgroundMusic) {
     backgroundMusic.play().catch(err => console.error('Error playing background music:', err));
     isBackgroundMusicPlaying = true;
+    
+    // If audio context and recorder destination exist, connect HTML Audio to recorder
+    if (audioContext && recorderDestination) {
+      try {
+        // Create media element source if needed
+        const source = audioContext.createMediaElementSource(backgroundMusic);
+        source.connect(audioContext.destination);
+        source.connect(recorderDestination);
+        console.log('[BACKGROUND] Connected HTML Audio background music to recorder');
+      } catch (e) {
+        // This might throw if the source is already connected
+        console.warn('[BACKGROUND] Could not connect background music to recorder:', e);
+      }
+    }
   }
 };
 
@@ -1361,135 +1447,254 @@ export const resetExtractedNotes = (): void => {
  * @param volume Le volume de la note (0-1)
  */
 export const playMIDINote = (volume: number = 0.7): void => {
-  // Vérifier si nous avons des notes MIDI à jouer
-  if (!midiFileLoaded || midiNotes.length === 0) {
-    // console.log("[MIDI PLAY] Aucune note MIDI disponible"); // Commenté pour moins de verbosité
+  if (!audioContext) {
+    console.warn('[MIDI] Cannot play MIDI note: audio context not initialized');
     return;
   }
-
+  
+  // Resume audio context if suspended (required by browsers)
+  if (audioContext.state === 'suspended') {
+    audioContext.resume().catch(err => {
+      console.error('[MIDI] Failed to resume audio context:', err);
+    });
+  }
+  
+  if (!midiFileLoaded || midiNotes.length === 0) {
+    console.warn('[MIDI] No MIDI sequence loaded');
+    return;
+  }
+  
   try {
-    // S'assurer que Tone.js est démarré
-    if (Tone.Transport.state !== 'started') {
-      Tone.start().catch(err => console.log('Erreur démarrage Tone.js:', err));
-    }
-
-    // Obtenir la note actuelle
-    const noteIndex = midiCurrentIndex % midiNotes.length;
-    const noteData = midiNotes[noteIndex];
-
-    // MODIFICATION: Filtrer par piste si un index de piste est sélectionné
-    if (midiSelectedTrackIndex !== null && noteData.track !== midiSelectedTrackIndex) {
-      midiCurrentIndex = (midiCurrentIndex + 1) % midiNotes.length; // Passer à la note suivante
-      // Essayer de jouer la note suivante immédiatement si celle-ci est filtrée
-      if (midiNotes.length > 1) { // Pour éviter une boucle infinie si toutes les notes sont filtrées
-          playMIDINote(volume); 
-      }
-      return;
-    }
-
-    // console.log(`[MIDI PLAY] Note #${noteIndex}/${midiNotes.length-1}: Piste ${noteData.track}, Note ${noteData.note}, Instrument: ${midiSelectedInstrumentPreset}, Tonalité: ${midiTonality}`);
-
-    // Création d'un synthétiseur approprié
-    let synth: Tone.PolySynth | Tone.Synth | Tone.MetalSynth | Tone.FMSynth;
+    // Get a note from the sequence based on pattern
+    let note;
+    let track;
     
-    // MODIFICATION: Utiliser l'instrument sélectionné ou le cycle par défaut
-    let instrumentChoice = midiSelectedInstrumentPreset;
-    if (instrumentChoice === MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING) {
-        const trackTypeLocal = noteData.track % 5; // Renamed to avoid conflict
-        switch (trackTypeLocal) {
-            case 0: instrumentChoice = MIDI_INSTRUMENT_PRESETS.MELODIC_MAIN; break;
-            case 1: instrumentChoice = MIDI_INSTRUMENT_PRESETS.PAD_STRINGS; break;
-            case 2: instrumentChoice = MIDI_INSTRUMENT_PRESETS.PERCUSSIVE; break;
-            case 3: instrumentChoice = MIDI_INSTRUMENT_PRESETS.METAL_SYNTH; break;
-            case 4: instrumentChoice = MIDI_INSTRUMENT_PRESETS.FM_SYNTH; break;
-            default: instrumentChoice = MIDI_INSTRUMENT_PRESETS.MELODIC_MAIN;
+    // Logic for track selection based on preset or specific track
+    if (midiSelectedTrackIndex !== null) {
+      // Find a note from the specific track only
+      const trackNotes = midiNotes.filter(n => n.track === midiSelectedTrackIndex);
+      if (trackNotes.length > 0) {
+        // Random selection from the specific track
+        const randomIndex = Math.floor(Math.random() * trackNotes.length);
+        note = trackNotes[randomIndex].note;
+        track = trackNotes[randomIndex].track;
+      } else {
+        // Fallback if no notes in selected track
+        midiCurrentIndex = (midiCurrentIndex + 1) % midiNotes.length;
+        note = midiNotes[midiCurrentIndex].note;
+        track = midiNotes[midiCurrentIndex].track;
+      }
+    } else {
+      // Default cycling behavior or preset-based selection
+      if (midiSelectedInstrumentPreset === MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING) {
+        // Original behavior: cycle through notes
+        midiCurrentIndex = (midiCurrentIndex + 1) % midiNotes.length;
+        note = midiNotes[midiCurrentIndex].note;
+        track = midiNotes[midiCurrentIndex].track;
+      } else {
+        // Random selection for more variety
+        const randomIndex = Math.floor(Math.random() * midiNotes.length);
+        note = midiNotes[randomIndex].note;
+        track = midiNotes[randomIndex].track;
+      }
+    }
+    
+    // Apply tonality transposition
+    note = note + midiTranspose;
+    
+    // Ensure note is within MIDI range (0-127)
+    note = Math.min(127, Math.max(0, note));
+    
+    // Calculate frequency using the MIDI note number
+    const frequency = 440 * Math.pow(2, (note - 69) / 12);
+    console.log(`[MIDI] Playing note: ${note} (${midiToNoteName(note)}), frequency: ${frequency.toFixed(2)}Hz, track: ${track}`);
+    
+    // For MIDI sound playing, create an oscillator with variable waveform based on track
+    // Different tracks will have different timbres
+    let oscillator: OscillatorNode | null = null;
+    let gainNode = audioContext.createGain();
+    
+    // Set initial gain to 0 for fade-in
+    gainNode.gain.value = 0;
+    
+    // Apply volume
+    const adjustedVolume = Math.min(1, Math.max(0.1, volume * midiVolume));
+    
+    // Fade in time
+    const attackTime = 0.02; // 20ms attack
+    const decayTime = 0.2;  // 200ms decay 
+    let releaseTime = 0.3; // 300ms release - using let instead of const to allow modification
+    const sustainLevel = 0.7; // 70% of peak volume
+    
+    // Create different synthesizer types based on the preset or track
+    let synthType: number;
+    
+    // Determine synth type based on preset
+    if (midiSelectedInstrumentPreset === MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING) {
+      // Original behavior: cycle through synth types
+      synthType = track % 5;
+    } else if (midiSelectedInstrumentPreset === MIDI_INSTRUMENT_PRESETS.MELODIC_MAIN) {
+      synthType = 0; // PolySynth 
+    } else if (midiSelectedInstrumentPreset === MIDI_INSTRUMENT_PRESETS.PAD_STRINGS) {
+      synthType = 1; // Sine Synth
+    } else if (midiSelectedInstrumentPreset === MIDI_INSTRUMENT_PRESETS.PERCUSSIVE) {
+      synthType = 2; // Triangle Synth 
+    } else if (midiSelectedInstrumentPreset === MIDI_INSTRUMENT_PRESETS.METAL_SYNTH) {
+      synthType = 3; // Metal Synth
+    } else if (midiSelectedInstrumentPreset === MIDI_INSTRUMENT_PRESETS.FM_SYNTH) {
+      synthType = 4; // FM Synth
+    } else {
+      // Default
+      synthType = track % 5;
+    }
+    
+    // Create different effects based on synth type
+    switch(synthType) {
+      case 0: // PolySynth - for melodic main lines
+        oscillator = audioContext.createOscillator();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = frequency;
+        
+        // Create Detune for richer sound
+        const detune = 5; // Slight detune for chorus effect
+        oscillator.detune.value = detune;
+        
+        // Connect to gain node
+        oscillator.connect(gainNode);
+        break;
+        
+      case 1: // SineSynth - for pad/string sounds
+        oscillator = audioContext.createOscillator();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = frequency;
+        
+        // Create a slow vibrato
+        const vibratoAmount = 3; // Very subtle
+        const vibratoSpeed = 4; // 4 Hz
+        
+        const vibratoOsc = audioContext.createOscillator();
+        vibratoOsc.type = 'sine';
+        vibratoOsc.frequency.value = vibratoSpeed;
+        
+        const vibratoGain = audioContext.createGain();
+        vibratoGain.gain.value = vibratoAmount;
+        
+        vibratoOsc.connect(vibratoGain);
+        vibratoGain.connect(oscillator.detune);
+        
+        // Longer release
+        releaseTime = 0.8;
+        
+        oscillator.connect(gainNode);
+        vibratoOsc.start();
+        break;
+        
+      case 2: // TriangleSynth - for percussive sounds
+        oscillator = audioContext.createOscillator();
+        oscillator.type = 'triangle';
+        oscillator.frequency.value = frequency;
+        
+        // Shorter attack and shorter release for percussive sound
+        const attackTimeTri = 0.01;
+        const releaseTimeTri = 0.1;
+        releaseTime = releaseTimeTri; // Set the main releaseTime variable
+        
+        // Connect to gain node
+        oscillator.connect(gainNode);
+        break;
+        
+      case 3: // MetalSynth - for metallic sounds
+        oscillator = audioContext.createOscillator();
+        oscillator.type = 'sawtooth';
+        oscillator.frequency.value = frequency;
+        
+        // Create a distortion/waveshaper for metallic sound
+        const distortion = audioContext.createWaveShaper();
+        
+        // Simple distortion curve
+        const distortionCurve = new Float32Array(1024);
+        for (let i = 0; i < 1024; i++) {
+          // Moderate distortion amount
+          const x = (i / 1024) * 2 - 1;
+          distortionCurve[i] = Math.tanh(3 * x); // Tanh provides a nice distortion curve
         }
+        
+        distortion.curve = distortionCurve;
+        
+        // Connect with distortion
+        oscillator.connect(distortion);
+        distortion.connect(gainNode);
+        break;
+        
+      case 4: // FMSynth - for complex tones
+        // Create carrier
+        const carrier = audioContext.createOscillator();
+        carrier.type = 'sine';
+        carrier.frequency.value = frequency;
+        
+        // Create modulator
+        const modulator = audioContext.createOscillator();
+        modulator.type = 'sine';
+        
+        // Modulator frequency determines FM character
+        const modulationIndex = 100; // Modulation amount
+        const modulationRatio = 2.5; // Modulation frequency ratio
+        
+        modulator.frequency.value = frequency * modulationRatio;
+        
+        // Connect modulator to carrier frequency
+        const modulationGain = audioContext.createGain();
+        modulationGain.gain.value = modulationIndex;
+        
+        modulator.connect(modulationGain);
+        modulationGain.connect(carrier.frequency);
+        carrier.connect(gainNode);
+        
+        modulator.start();
+        oscillator = carrier; // We'll start/stop the carrier like any other oscillator
+        break;
+        
+      default:
+        oscillator = audioContext.createOscillator();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = frequency;
+        oscillator.connect(gainNode);
     }
-
-    // MODIFICATION: Amélioration des paramètres de synthèse pour des sons plus reconnaissables
-    switch (instrumentChoice) {
-      case MIDI_INSTRUMENT_PRESETS.MELODIC_MAIN:
-        synth = new Tone.PolySynth(Tone.Synth, {
-          oscillator: { type: "triangle" },
-          envelope: { attack: 0.05, decay: 0.1, sustain: 0.7, release: 1.5 }
-        }).toDestination();
-        break;
-      case MIDI_INSTRUMENT_PRESETS.PAD_STRINGS:
-        synth = new Tone.Synth({
-          oscillator: { type: "sine" },
-          envelope: { attack: 0.1, decay: 0.3, sustain: 0.8, release: 2.0 }
-        }).toDestination();
-        break;
-      case MIDI_INSTRUMENT_PRESETS.PERCUSSIVE:
-        synth = new Tone.Synth({
-          oscillator: { type: "triangle" },
-          envelope: { attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.8 }
-        }).toDestination();
-        break;
-      case MIDI_INSTRUMENT_PRESETS.METAL_SYNTH:
-        synth = new Tone.MetalSynth({
-          envelope: { attack: 0.001, decay: 0.2, release: 0.5 },
-          harmonicity: 5.1, modulationIndex: 20, resonance: 4000, octaves: 1.5
-        }).toDestination();
-        break;
-      case MIDI_INSTRUMENT_PRESETS.FM_SYNTH:
-        synth = new Tone.FMSynth({
-          harmonicity: 3, modulationIndex: 5,
-          oscillator: { type: "sine" },
-          envelope: { attack: 0.05, decay: 0.3, sustain: 0.6, release: 1.2 },
-          modulation: { type: "square" },
-          modulationEnvelope: { attack: 0.2, decay: 0.01, sustain: 0.9, release: 0.7 }
-        }).toDestination();
-        break;
-      default: 
-        synth = new Tone.PolySynth(Tone.Synth).toDestination();
-    }
-
-    // Configurer le volume
-    const adjustedVolume = Math.min(1, Math.max(0, volume * midiVolume));
     
-    // Application du volume
-    if (synth.volume) {
-      synth.volume.value = Tone.gainToDb(adjustedVolume);
+    // Connect gain node to master output and to recorder
+    if (masterGainNode) {
+      gainNode.connect(masterGainNode);
     } else {
-      // Cas des synthés qui n'ont pas de propriété volume directe
-      const gainNode = new Tone.Gain(adjustedVolume).toDestination();
-      synth.connect(gainNode);
-      synth.disconnect(Tone.Destination);
+      gainNode.connect(audioContext.destination);
     }
     
-    // Conversion du numéro MIDI en note - meilleure conversion plus précise
-    const noteName = midiToNoteName(noteData.note);
-    
-    // MODIFICATION: Durée augmentée pour des notes plus reconnaissables
-    // Utiliser des durées plus longues pour toutes les notes
-    const duration = 0.6; // Durée fixe plus longue pour toutes les notes
-    
-    // Jouer la note
-    if (instrumentChoice === MIDI_INSTRUMENT_PRESETS.METAL_SYNTH) { 
-      synth.triggerAttackRelease("C2", duration); // Ajouter une note de base
-    } else {
-      synth.triggerAttackRelease(noteName, duration);
-      
-      // MODIFICATION: Ajouter une répétition rapide de la note pour la rendre plus reconnaissable
-      if (instrumentChoice !== MIDI_INSTRUMENT_PRESETS.PAD_STRINGS) {
-        setTimeout(() => {
-          synth.triggerAttackRelease(noteName, duration * 0.5, Tone.now(), adjustedVolume * 0.7);
-        }, 180);
-      }
+    // Always connect directly to recorder for reliable recording
+    if (recorderDestination) {
+      gainNode.connect(recorderDestination);
+      console.log('[MIDI] Connected MIDI sound to recorder destination');
     }
     
-    // Passer à la note suivante
-    midiCurrentIndex = (midiCurrentIndex + 1) % midiNotes.length;
+    // Apply ADSR envelope
+    const now = audioContext.currentTime;
+    gainNode.gain.setValueAtTime(0, now);
+    gainNode.gain.linearRampToValueAtTime(adjustedVolume, now + attackTime);
+    gainNode.gain.linearRampToValueAtTime(adjustedVolume * sustainLevel, now + attackTime + decayTime);
+    gainNode.gain.setValueAtTime(adjustedVolume * sustainLevel, now + attackTime + decayTime + 0.1);
+    gainNode.gain.linearRampToValueAtTime(0, now + attackTime + decayTime + 0.1 + releaseTime);
     
-    // Nettoyer le synthé après un délai
+    // Start the oscillator
+    oscillator.start();
+    
+    // Stop after the envelope completes
+    oscillator.stop(now + attackTime + decayTime + 0.1 + releaseTime + 0.1); // Add small buffer
+    
+    // Clean up
     setTimeout(() => {
-      if (typeof synth.dispose === 'function') {
-        synth.dispose();
-      }
-    }, 3000); // Délai plus long pour permettre aux notes de finir
-  } catch (error) {
-    console.error('[MIDI PLAY] Erreur lors de la lecture de la note MIDI:', error);
+      oscillator = null;
+    }, (attackTime + decayTime + 0.1 + releaseTime + 0.2) * 1000);
+    
+  } catch (e) {
+    console.error('[MIDI] Error playing MIDI note:', e);
   }
 };
 
@@ -1854,56 +2059,190 @@ export const playWallSound = (
   volume: number = 0.3, 
   useCustom: boolean = false
 ): void => {
-  console.log(`[DEBUG WALL SOUND] playWallSound called with volume=${volume}, useCustom=${useCustom}, hasCustomSound('wall')=${hasCustomSound('wall')}`);
+  console.log(`[DEBUG playWallSound] Called with volume=${volume}, useCustom=${useCustom}`);
   
   // Ne rien jouer si les sons standards sont désactivés (à moins qu'on utilise un son custom)
   if (!standardSoundsEnabled && !useCustom) {
-    console.log(`[DEBUG WALL SOUND] Standard sounds disabled and not using custom sound. Returning.`);
+    console.log('[DEBUG playWallSound] Skipping playback: standardSoundsEnabled=false and useCustom=false');
     return;
   }
   
   if (!audioContext) {
-    console.error('[DEBUG WALL SOUND] No audio context available for wall sound');
+    console.warn('[DEBUG playWallSound] Cannot play sound: audio context not initialized');
     return;
   }
   
+  // Resume audio context if it's suspended (browser policy)
+  if (audioContext.state === 'suspended') {
+    console.log('[DEBUG playWallSound] Resuming audio context for sound playback');
+    audioContext.resume().catch(err => {
+      console.error('[DEBUG playWallSound] Failed to resume audio context:', err);
+    });
+  }
+  
   try {
-    console.log(`[DEBUG WALL SOUND] Using ${useCustom && hasCustomSound('wall') ? 'custom' : 'standard'} wall sound`);
+    // Check if custom sound is available and requested
+    const hasCustomWall = useCustom && customSounds.wall !== null;
+    console.log(`[DEBUG playWallSound] HasCustomWall: ${hasCustomWall}, customSounds.wall: ${customSounds.wall ? 'exists' : 'null'}`);
     
-    // Utiliser le son personnalisé s'il existe et si demandé
-    const soundBuffer = (useCustom && customSounds.wall) ? customSounds.wall : soundCache['bounce'];
+    // Use custom or bounce sound buffer
+    const soundBuffer = hasCustomWall ? customSounds.wall : soundCache['bounce'];
     
-    // Vérifier si le tampon sonore existe
     if (!soundBuffer) {
-      console.warn(`[DEBUG WALL SOUND] No sound buffer available for wall collision`);
+      console.warn('[DEBUG playWallSound] No sound buffer available');
       return;
     }
     
-    console.log(`[DEBUG WALL SOUND] Sound buffer obtained: ${(useCustom && customSounds.wall) ? 'custom' : 'standard'}`);
-    
+    console.log(`[DEBUG playWallSound] Creating buffer source with ${hasCustomWall ? 'custom' : 'default'} sound`);
     const source = audioContext.createBufferSource();
     source.buffer = soundBuffer;
     
     const gainNode = audioContext.createGain();
-    // Réduire encore davantage le volume en le divisant par 2
-    gainNode.gain.value = Math.min(0.5, Math.max(0.05, volume / 2));
-    console.log(`[DEBUG WALL SOUND] Set gain node value to ${gainNode.gain.value}`);
+    // Limit volume and apply gentle reduction
+    gainNode.gain.value = Math.min(0.7, Math.max(0.05, volume));
     
     source.connect(gainNode);
     
-    // Connect to both the audio context destination and recorder if available
-    gainNode.connect(audioContext.destination);
-    
-    // Also connect to recorder destination if available
-    if (recorderDestination) {
-      gainNode.connect(recorderDestination);
-      console.log(`[DEBUG WALL SOUND] Connected to recorder destination`);
+    // Connect to master gain for consistent mixing
+    if (masterGainNode) {
+      gainNode.connect(masterGainNode);
+    } else {
+      gainNode.connect(audioContext.destination);
     }
     
-    console.log(`[DEBUG WALL SOUND] Starting sound playback`);
+    // Always connect to recorder for reliable capture
+    if (recorderDestination) {
+      gainNode.connect(recorderDestination);
+      console.log('[DEBUG playWallSound] Connected to recorder destination');
+    } else {
+      console.log('[DEBUG playWallSound] No recorder destination available');
+    }
+    
     source.start();
-    console.log(`[DEBUG WALL SOUND] Sound playback started successfully`);
+    console.log('[DEBUG playWallSound] Sound playback started');
   } catch (e) {
-    console.error(`[DEBUG WALL SOUND] Error playing wall sound:`, e);
+    console.error('[DEBUG playWallSound] Error playing wall sound:', e);
+  }
+};
+
+// Function to play background music using WebAudio oscillator
+export const playBackgroundOscillator = (volume: number = 0.4): void => {
+  if (!audioContext) {
+    console.warn('[BACKGROUND] Cannot play background music: audio context not initialized');
+    return;
+  }
+  
+  // Resume audio context if suspended (required by browsers)
+  if (audioContext.state === 'suspended') {
+    audioContext.resume().catch(err => {
+      console.error('[BACKGROUND] Failed to resume audio context:', err);
+    });
+  }
+
+  if (backgroundMusicPlaying) {
+    stopBackgroundOscillator();
+  }
+
+  try {
+    // Créer un oscillateur pour le son de fond
+    const oscillator = audioContext.createOscillator();
+    backgroundMusicOscillator = oscillator;
+    oscillator.type = 'sine'; // Utiliser une onde sinusoïdale pour un son doux
+    
+    // Calculer la fréquence de base pour la note
+    let baseFrequency;
+    
+    // Trouver une fréquence qui correspond à la tonalité sélectionnée
+    if (midiTonality === 'major') {
+      // Utiliser une note majeure (do majeur)
+      baseFrequency = 261.63; // Do (C4)
+    } else if (midiTonality === 'minor') {
+      // Utiliser une note mineure (la mineur)
+      baseFrequency = 220.00; // La (A3)
+    } else {
+      // Tonalité par défaut
+      baseFrequency = 261.63; // Do (C4)
+    }
+    
+    // Appliquer la transposition
+    oscillator.frequency.value = baseFrequency * Math.pow(2, midiTranspose / 12);
+    
+    // Créer un nœud de gain pour contrôler le volume
+    const gainNode = audioContext.createGain();
+    backgroundMusicGainNode = gainNode;
+    
+    // Définir le volume initial à 0 pour un fondu entrant
+    gainNode.gain.value = 0;
+    
+    // Connecter l'oscillateur au nœud de gain
+    oscillator.connect(gainNode);
+    
+    // Connecter le nœud de gain à la destination audio principale
+    if (masterGainNode) {
+      gainNode.connect(masterGainNode);
+    } else {
+      gainNode.connect(audioContext.destination);
+    }
+    
+    // Always connect to recorder destination if available
+    if (recorderDestination) {
+      gainNode.connect(recorderDestination);
+      console.log('[BACKGROUND] Connected background music to recorder destination');
+    }
+    
+    // Démarrer l'oscillateur
+    oscillator.start();
+    backgroundMusicPlaying = true;
+    
+    // Définir un fondu entrant progressif pour le volume
+    const now = audioContext.currentTime;
+    gainNode.gain.setValueAtTime(0, now);
+    gainNode.gain.linearRampToValueAtTime(volume * 0.1, now + 2.0); // 2 secondes de fondu entrant
+    
+    console.log('[BACKGROUND] Background music started');
+    
+  } catch (e) {
+    console.error('[BACKGROUND] Error playing background music:', e);
+    backgroundMusicPlaying = false;
+    backgroundMusicOscillator = null;
+    backgroundMusicGainNode = null;
+  }
+};
+
+// Add the function to stop background music oscillator
+export const stopBackgroundOscillator = (): void => {
+  // Stop the WebAudio oscillator if it's playing
+  if (backgroundMusicOscillator && backgroundMusicGainNode) {
+    try {
+      // Apply fade out
+      if (audioContext) {
+        const now = audioContext.currentTime;
+        backgroundMusicGainNode.gain.setValueAtTime(backgroundMusicGainNode.gain.value, now);
+        backgroundMusicGainNode.gain.linearRampToValueAtTime(0, now + 0.5);
+        
+        // Stop after fade
+        setTimeout(() => {
+          if (backgroundMusicOscillator) {
+            backgroundMusicOscillator.stop();
+            backgroundMusicOscillator = null;
+          }
+          if (backgroundMusicGainNode) {
+            backgroundMusicGainNode.disconnect();
+            backgroundMusicGainNode = null;
+          }
+        }, 600);
+      } else {
+        // No context, stop immediately
+        backgroundMusicOscillator.stop();
+        backgroundMusicOscillator = null;
+        backgroundMusicGainNode.disconnect();
+        backgroundMusicGainNode = null;
+      }
+      
+      backgroundMusicPlaying = false;
+      console.log('[BACKGROUND] Background music oscillator stopped');
+    } catch (e) {
+      console.error('[BACKGROUND] Error stopping background music oscillator:', e);
+    }
   }
 };

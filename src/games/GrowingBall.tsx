@@ -66,11 +66,12 @@ const MAINTAIN_CONSTANT_SPEED = false; // La gravité nécessite des changements
 const SMOOTH_COLLISIONS = true;
 const WALL_BOUNCE_FORCE = 0.0;        // MODIFIED: Pas de force additionnelle au rebond mural
 const WALL_MARGIN = 5.0;
-const WALL_IMMUNITY_TIME = 150;       // Temps d'immunité réduit
+const WALL_IMMUNITY_TIME = 50;       // REDUCED from 150ms to 50ms to allow more frequent corrections
 const RANDOM_BOUNCE_ANGLE = true;
 const RANDOM_ANGLE_MAX = 0.15;
 const REALISTIC_GRAVITY = true;
 const WALL_TANGENTIAL_FRICTION = 1.0; // MODIFIED: Pas de friction tangentielle sur les murs
+const MIN_WALL_BOUNCE_VELOCITY = 3.0; // NEW: Increased minimum rebound velocity after wall collision
 
 // Explicitly define the allowed types for music scales
 type MusicScaleKey = 'majorScale' | 'minorScale' | 'pentatonic' | 'blues' | 'jazz' | 'eastern';
@@ -108,6 +109,19 @@ interface GrowingBallProps extends GameProps {
   midiTonality?: string; // New prop: Tonality for MIDI sounds (e.g. "C", "D", "F#")
   midiInstrumentPreset?: MIDIInstrumentPresetKey;
   midiTrackIndex?: number | null;
+  backgroundColor?: string; // New prop for background color
+  circleColor?: string; // New prop for circle color
+  circleAnimationEnabled?: boolean; // New prop to enable/disable circle animation
+  circleAnimationDuration?: number; // New prop for circle animation duration
+  showRecordingControls?: boolean; // New prop to show/hide recording controls
+  showConfigPanel?: boolean; // Add prop to show/hide config panel
+  
+  // Add callback props for propagating changes to parent
+  onBackgroundColorChange?: (color: string) => void;
+  onCircleColorChange?: (color: string) => void;
+  onCircleAnimationEnabledChange?: (enabled: boolean) => void;
+  onCircleAnimationDurationChange?: (duration: number) => void;
+  onShowRecordingControlsChange?: (show: boolean) => void;
 }
 
 interface EnhancedBall extends Ball {
@@ -199,7 +213,18 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
   midiVolume = 0.7,
   midiTonality = "C", // Default tonality is C
   midiInstrumentPreset = MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING,
-  midiTrackIndex = null
+  midiTrackIndex = null,
+  backgroundColor = '#000000', // Default background color
+  circleColor = 'rgba(255, 100, 0, 0.8)', // Default circle color
+  circleAnimationEnabled = true, // Default to enabled
+  circleAnimationDuration = 500, // Default animation duration in ms
+  showRecordingControls = false, // Default to hidden
+  showConfigPanel = false,
+  onBackgroundColorChange,
+  onCircleColorChange,
+  onCircleAnimationEnabledChange,
+  onCircleAnimationDurationChange,
+  onShowRecordingControlsChange
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
@@ -211,6 +236,22 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
   });
   const [backgroundBrightness, setBackgroundBrightness] = useState(0);
   const [loadedImages, setLoadedImages] = useState<HTMLImageElement[]>([]);
+  
+  // Add state for circle animation
+  const [circleAnimationActive, setCircleAnimationActive] = useState(false);
+  const [circleAnimationScale, setCircleAnimationScale] = useState(1);
+  const circleAnimationRef = useRef<number | null>(null);
+  
+  // Add state to track configuration settings and panel visibility
+  const [configSettings, setConfigSettings] = useState({
+    backgroundColor,
+    circleColor,
+    circleAnimationEnabled,
+    circleAnimationDuration,
+    showRecordingControls
+  });
+  
+  const [isConfigPanelVisible, setIsConfigPanelVisible] = useState(showConfigPanel);
   
   // Video recording state using our custom hook
   const { 
@@ -224,6 +265,22 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     getAudioContext,
     setupAudioRecording
   } = useGameRecorder();
+  
+  // Update configSettings when props change
+  useEffect(() => {
+    setConfigSettings({
+      backgroundColor,
+      circleColor,
+      circleAnimationEnabled,
+      circleAnimationDuration,
+      showRecordingControls
+    });
+  }, [backgroundColor, circleColor, circleAnimationEnabled, circleAnimationDuration, showRecordingControls]);
+
+  // Update config panel visibility when prop changes
+  useEffect(() => {
+    setIsConfigPanelVisible(showConfigPanel);
+  }, [showConfigPanel]);
   
   // Add state for custom sounds
   const [loadedSounds, setLoadedSounds] = useState<{[key: number]: HTMLAudioElement[]}>({});
@@ -260,6 +317,24 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
       connectToRecorder(destination);
       setAudioSetupComplete(true);
     }
+    
+    // Ensure audio is always resumed when needed (Safari/iOS often suspends it)
+    const resumeAudioContext = () => {
+      if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().then(() => {
+          console.log('Audio context resumed on user interaction');
+        });
+      }
+    };
+    
+    // Resume audio context on user interactions
+    document.addEventListener('click', resumeAudioContext);
+    document.addEventListener('touchstart', resumeAudioContext);
+    
+    return () => {
+      document.removeEventListener('click', resumeAudioContext);
+      document.removeEventListener('touchstart', resumeAudioContext);
+    };
   }, [getAudioDestination, setupAudioRecording]);
   
   // Précharger les images si nécessaire
@@ -737,39 +812,46 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
       const deltaTime = lastTimestamp ? Math.min((timestamp - lastTimestamp) / 16.67, 1) : 1;
       lastTimestamp = timestamp;
       
-      // Effacer le canvas (utiliser les dimensions d'affichage, pas les dimensions du canvas)
-      // Si trail effect est activé, ne pas effacer complètement le canvas pour créer l'effet de traînée
+      // Clear the canvas
       if (TRAIL_EFFECT) {
-        // Au lieu d'effacer complètement, dessiner un rectangle semi-transparent
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.1)'; // Opacité réduite pour une traînée plus longue
+        // Use custom background color with transparency
+        const bgColorWithAlpha = configSettings.backgroundColor.startsWith('rgba') 
+          ? configSettings.backgroundColor.replace(/[\d.]+\)$/, '0.1)') 
+          : `rgba(${hexToRgb(configSettings.backgroundColor)}, 0.1)`;
+        ctx.fillStyle = bgColorWithAlpha;
         ctx.fillRect(0, 0, displayWidth, displayHeight);
       } else {
-        // Effacement complet si l'effet de traînée est désactivé
         ctx.clearRect(0, 0, displayWidth, displayHeight);
       }
       
-      // Dessiner l'arrière-plan
+      // Dessiner l'arrière-plan avec la couleur personnalisée
+      const rgbValues = hexToRgb(configSettings.backgroundColor);
       const bgGradient = ctx.createRadialGradient(
         centerX, centerY, 0,
         centerX, centerY, displayWidth > displayHeight ? displayWidth : displayHeight
       );
-      bgGradient.addColorStop(0, `hsla(0, 0%, ${backgroundBrightness + 10}%, 1)`);
-      bgGradient.addColorStop(1, `hsla(0, 0%, ${backgroundBrightness}%, 1)`);
+      bgGradient.addColorStop(0, `rgba(${rgbValues}, ${backgroundBrightness/100 + 0.1})`);
+      bgGradient.addColorStop(1, `rgba(${rgbValues}, ${backgroundBrightness/100})`);
       ctx.fillStyle = bgGradient;
       ctx.fillRect(0, 0, displayWidth, displayHeight);
       
-      // Dessiner le cercle extérieur
+      // Draw the outer circle with custom color and animation
       ctx.save();
       ctx.beginPath();
-      ctx.arc(centerX, centerY, circleRadius, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(255, 100, 0, 0.8)';
+      const animatedRadius = circleAnimationActive ? circleRadius * circleAnimationScale : circleRadius;
+      ctx.arc(centerX, centerY, animatedRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = configSettings.circleColor;
       ctx.lineWidth = 2;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.stroke();
       
       if (effectsEnabled) {
-        ctx.shadowColor = 'rgba(255, 100, 0, 0.5)';
+        // Add glow effect to the circle
+        const circleColorRgb = configSettings.circleColor.startsWith('rgba') 
+          ? configSettings.circleColor.replace(/^rgba?\(|\)$/g, '').split(',').slice(0, 3).join(',')
+          : hexToRgb(configSettings.circleColor);
+        ctx.shadowColor = `rgba(${circleColorRgb}, 0.5)`;
         ctx.shadowBlur = 15;
         ctx.stroke();
       }
@@ -796,6 +878,9 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
       // Mettre à jour les positions des balles avec une physique améliorée
       updatedBalls = updatedBalls.map((enhancedBall) => {
         const ball = enhancedBall as EnhancedBall;
+        
+        // Apply anti-sticking measures at the start of each frame
+        preventWallSticking(ball, displayWidth, displayHeight);
         
         let newVx = ball.velocity.x;
         let newVy = ball.velocity.y;
@@ -1357,7 +1442,14 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     growthRate, 
     bounciness, 
     standardSoundsEnabled,
-    bounceVolume
+    bounceVolume,
+    backgroundColor,
+    circleColor,
+    circleAnimationEnabled,
+    circleAnimationDuration,
+    circleAnimationActive,
+    circleAnimationScale,
+    configSettings
     ]);
   
   // Setup canvas dimensions
@@ -1480,28 +1572,56 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
 
   // Toggle recording with audio capture
   const toggleRecording = () => {
-    // Assurez-vous que le contexte audio est activé avant l'enregistrement 
-    // (les navigateurs nécessitent une interaction utilisateur)
+    // Ensure audio context is resumed before recording
     const context = getSoundAudioContext();
     if (context && context.state === 'suspended') {
+      console.log('Resuming audio context before recording');
       context.resume().then(() => {
         console.log('Audio context resumed for recording');
+        // Only start/stop recording after context is definitely resumed
+        handleRecordingToggle();
+      }).catch(err => {
+        console.error('Failed to resume audio context:', err);
+        // Try to continue anyway
+        handleRecordingToggle();
       });
+    } else {
+      handleRecordingToggle();
     }
-    
+  };
+
+  // Actual recording toggle implementation
+  const handleRecordingToggle = () => {
     if (isRecording) {
+      console.log('Stopping recording...');
       stopRecording().then(blob => {
         if (blob) {
-          console.log('Recording stopped, blob size:', blob.size);
+          console.log('Recording stopped successfully, blob size:', blob.size);
+        } else {
+          console.error('Recording stopped but no blob was created');
         }
+      }).catch(err => {
+        console.error('Error stopping recording:', err);
       });
     } else {
       if (canvasRef.current) {
-        // Use higher quality and bitrate for recording with audio capture
+        console.log('Starting recording with audio capture...');
+        
+        // Make sure all audio systems are properly connected before recording
+        const destination = getAudioDestination();
+        if (destination) {
+          connectToRecorder(destination);
+          console.log('Reconnected audio system to recorder');
+        }
+        
+        // Use more stable settings for better compatibility
         startRecording(canvasRef.current, 60000, {
-          frameRate: 60,
-          videoBitsPerSecond: 5000000, // 5 Mbps
+          frameRate: 30, // Lower to 30fps for stability
+          videoBitsPerSecond: 3000000, // 3 Mbps for better compatibility
           captureAudio: true // Enable audio capture
+        }).catch(err => {
+          console.error('Failed to start recording:', err);
+          alert('Recording failed to start. Please try again.');
         });
       }
     }
@@ -1548,6 +1668,38 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     timestamp: number
   ) => {
     console.log(`[COLLISION] Collision avec cercle, radius avant: ${ball.radius.toFixed(2)}, midiEnabled: ${midiEnabled}`);
+    
+    // Trigger circle animation if enabled
+    if (circleAnimationEnabled && configSettings.circleAnimationEnabled) {
+      setCircleAnimationActive(true);
+      setCircleAnimationScale(1.05); // Start with a slight scale up
+      
+      // Clear any existing animation
+      if (circleAnimationRef.current) {
+        cancelAnimationFrame(circleAnimationRef.current);
+      }
+      
+      // Animate the circle
+      let startTime = performance.now();
+      const animateCircle = (time: number) => {
+        const elapsed = time - startTime;
+        const progress = Math.min(1, elapsed / configSettings.circleAnimationDuration);
+        
+        // Ease out effect
+        const scale = 1 + (0.05 * (1 - progress));
+        setCircleAnimationScale(scale);
+        
+        if (progress < 1) {
+          circleAnimationRef.current = requestAnimationFrame(animateCircle);
+        } else {
+          setCircleAnimationActive(false);
+          setCircleAnimationScale(1);
+          circleAnimationRef.current = null;
+        }
+      };
+      
+      circleAnimationRef.current = requestAnimationFrame(animateCircle);
+    }
     
     // Stocker la vitesse avant collision pour la maintenir après
     const speedBeforeCollision = Math.sqrt(newVx * newVx + newVy * newVy);
@@ -1689,6 +1841,9 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     };
     
     let collided = false;
+    
+    // SAFETY_MARGIN ensures the ball is placed with enough clearance from the wall
+    const SAFETY_MARGIN = ball.radius * 0.1 + 2; // Increased from 0.05 to 0.1, and base value from 1 to 2
 
     // Check for collision and reflect velocity
     // Ensure position is corrected to prevent sticking
@@ -1698,14 +1853,27 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
       
       if (shouldUpdatePhysics) {
         console.log(`[DEBUG COLLISION] Updating physics for right wall collision`);
-        // Corriger la position pour un contact exact avec le mur
-        ball.position.x = canvasWidth - ball.radius - WALL_MARGIN;
+        // Corriger la position pour un contact exact avec le mur avec une marge de sécurité
+        ball.position.x = canvasWidth - ball.radius - WALL_MARGIN - SAFETY_MARGIN;
         // Inverser la vélocité X avec un peu d'atténuation contrôlée par le bounciness
         ball.velocity.x = -Math.abs(ball.velocity.x) * currentBounciness;
+        // Ensure minimum horizontal velocity away from wall
+        if (Math.abs(ball.velocity.x) < MIN_WALL_BOUNCE_VELOCITY) {
+          ball.velocity.x = -MIN_WALL_BOUNCE_VELOCITY;
+        }
         // Appliquer une friction à la vélocité Y pour simuler une friction au mur
         ball.velocity.y *= WALL_TANGENTIAL_FRICTION;
         console.log(`[DEBUG COLLISION] After right wall: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
       } else {
+        // Even during immunity, ensure ball is not inside wall
+        if (ball.position.x + ball.radius > canvasWidth - WALL_MARGIN) {
+          ball.position.x = canvasWidth - ball.radius - WALL_MARGIN - SAFETY_MARGIN;
+          
+          // Always ensure minimum velocity away from wall, even during immunity
+          if (ball.velocity.x >= -0.5) {
+            ball.velocity.x = -MIN_WALL_BOUNCE_VELOCITY;
+          }
+        }
         console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
       }
       
@@ -1715,14 +1883,27 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
       console.log(`[DEBUG COLLISION] Left wall collision detected`);
       
       if (shouldUpdatePhysics) {
-        // Corriger la position pour un contact exact avec le mur
-        ball.position.x = ball.radius + WALL_MARGIN;
+        // Corriger la position pour un contact exact avec le mur avec une marge de sécurité
+        ball.position.x = ball.radius + WALL_MARGIN + SAFETY_MARGIN;
         // Inverser la vélocité X avec un peu d'atténuation
         ball.velocity.x = Math.abs(ball.velocity.x) * currentBounciness;
+        // Ensure minimum horizontal velocity away from wall
+        if (Math.abs(ball.velocity.x) < MIN_WALL_BOUNCE_VELOCITY) {
+          ball.velocity.x = MIN_WALL_BOUNCE_VELOCITY;
+        }
         // Appliquer une friction à la vélocité Y
         ball.velocity.y *= WALL_TANGENTIAL_FRICTION;
         console.log(`[DEBUG COLLISION] After left wall: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
       } else {
+        // Even during immunity, ensure ball is not inside wall
+        if (ball.position.x - ball.radius < WALL_MARGIN) {
+          ball.position.x = ball.radius + WALL_MARGIN + SAFETY_MARGIN;
+          
+          // Always ensure minimum velocity away from wall, even during immunity
+          if (ball.velocity.x <= 0.5) {
+            ball.velocity.x = MIN_WALL_BOUNCE_VELOCITY;
+          }
+        }
         console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
       }
       
@@ -1734,11 +1915,11 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
       wall = "floor";
       
       if (shouldUpdatePhysics) {
-        // IMPORTANT: S'assurer que la balle est exactement sur le sol
-        ball.position.y = canvasHeight - ball.radius - WALL_MARGIN;
+        // IMPORTANT: S'assurer que la balle est exactement sur le sol avec une marge de sécurité
+        ball.position.y = canvasHeight - ball.radius - WALL_MARGIN - SAFETY_MARGIN;
         
         // Force minimale pour éviter que la balle "colle" au sol
-        const minBounceVelocity = 1.0;
+        const minBounceVelocity = MIN_WALL_BOUNCE_VELOCITY; // Using the constant for consistency
         
         // Si la vitesse est trop faible, ajouter une impulsion minimale
         if (Math.abs(ball.velocity.y) < minBounceVelocity) {
@@ -1752,6 +1933,15 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
         ball.velocity.x *= DEFAULT_FRICTION;
         console.log(`[DEBUG COLLISION] After floor: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
       } else {
+        // Even during immunity, ensure ball is not inside floor
+        if (ball.position.y + ball.radius > canvasHeight - WALL_MARGIN) {
+          ball.position.y = canvasHeight - ball.radius - WALL_MARGIN - SAFETY_MARGIN;
+          
+          // Always ensure minimum velocity away from floor, even during immunity
+          if (ball.velocity.y >= -0.5) {
+            ball.velocity.y = -MIN_WALL_BOUNCE_VELOCITY;
+          }
+        }
         console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
       }
       
@@ -1760,14 +1950,27 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
       wall = "ceiling";
       
       if (shouldUpdatePhysics) {
-        // Corriger la position pour un contact exact avec le plafond
-        ball.position.y = ball.radius + WALL_MARGIN;
+        // Corriger la position pour un contact exact avec le plafond avec une marge de sécurité
+        ball.position.y = ball.radius + WALL_MARGIN + SAFETY_MARGIN;
         // Inverser la vélocité Y avec atténuation
         ball.velocity.y = Math.abs(ball.velocity.y) * currentBounciness;
+        // Ensure minimum vertical velocity away from ceiling
+        if (Math.abs(ball.velocity.y) < MIN_WALL_BOUNCE_VELOCITY) {
+          ball.velocity.y = MIN_WALL_BOUNCE_VELOCITY;
+        }
         // Appliquer une friction à la vélocité X
         ball.velocity.x *= WALL_TANGENTIAL_FRICTION;
         console.log(`[DEBUG COLLISION] After ceiling: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
       } else {
+        // Even during immunity, ensure ball is not inside ceiling
+        if (ball.position.y - ball.radius < WALL_MARGIN) {
+          ball.position.y = ball.radius + WALL_MARGIN + SAFETY_MARGIN;
+          
+          // Always ensure minimum velocity away from ceiling, even during immunity
+          if (ball.velocity.y <= 0.5) {
+            ball.velocity.y = MIN_WALL_BOUNCE_VELOCITY;
+          }
+        }
         console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
       }
       
@@ -1843,6 +2046,55 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
       }
     } else {
       console.log(`[DEBUG COLLISION] No wall collision detected`);
+    }
+  };
+
+  // New function to prevent wall sticking by checking and fixing ball positions each frame
+  const preventWallSticking = (ball: EnhancedBall, canvasWidth: number, canvasHeight: number) => {
+    const safetyMargin = ball.radius * 0.1 + 2; // More aggressive safety margin
+    
+    // Check and fix right wall sticking
+    if (ball.position.x + ball.radius >= canvasWidth - WALL_MARGIN) {
+      // Ball is touching or inside right wall
+      ball.position.x = canvasWidth - ball.radius - WALL_MARGIN - safetyMargin;
+      
+      // If velocity is too low or heading toward wall, push it away
+      if (ball.velocity.x >= -0.5) {
+        ball.velocity.x = -MIN_WALL_BOUNCE_VELOCITY;
+      }
+    }
+    
+    // Check and fix left wall sticking
+    if (ball.position.x - ball.radius <= WALL_MARGIN) {
+      // Ball is touching or inside left wall
+      ball.position.x = ball.radius + WALL_MARGIN + safetyMargin;
+      
+      // If velocity is too low or heading toward wall, push it away
+      if (ball.velocity.x <= 0.5) {
+        ball.velocity.x = MIN_WALL_BOUNCE_VELOCITY;
+      }
+    }
+    
+    // Check and fix floor sticking
+    if (ball.position.y + ball.radius >= canvasHeight - WALL_MARGIN) {
+      // Ball is touching or inside floor
+      ball.position.y = canvasHeight - ball.radius - WALL_MARGIN - safetyMargin;
+      
+      // If velocity is too low or heading toward floor, push it up
+      if (ball.velocity.y >= -0.5) {
+        ball.velocity.y = -MIN_WALL_BOUNCE_VELOCITY;
+      }
+    }
+    
+    // Check and fix ceiling sticking
+    if (ball.position.y - ball.radius <= WALL_MARGIN) {
+      // Ball is touching or inside ceiling
+      ball.position.y = ball.radius + WALL_MARGIN + safetyMargin;
+      
+      // If velocity is too low or heading toward ceiling, push it down
+      if (ball.velocity.y <= 0.5) {
+        ball.velocity.y = MIN_WALL_BOUNCE_VELOCITY;
+      }
     }
   };
 
@@ -1983,7 +2235,268 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     };
   }, [isPlaying, ballCount, growthRate, gravity, ballSpeed]);  // Removed effectsEnabled from dependency array
 
-  // Return the JSX canvas element
+  // Helper function to convert hex color to RGB values
+  const hexToRgb = (hex: string): string => {
+    // If already in RGB format, extract values
+    if (hex.startsWith('rgb')) {
+      return hex.replace(/^rgba?\(|\)$/g, '').split(',').slice(0, 3).join(',');
+    }
+    
+    // Otherwise convert from hex
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if (result) {
+      const r = parseInt(result[1], 16);
+      const g = parseInt(result[2], 16);
+      const b = parseInt(result[3], 16);
+      return `${r}, ${g}, ${b}`;
+    }
+    return '0, 0, 0'; // Default to black if invalid
+  };
+
+  // Create styles for recording controls
+  const recordingControlsStyles = {
+    container: {
+      position: 'absolute' as const,
+      bottom: '20px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      display: 'flex',
+      gap: '10px',
+      zIndex: 1000,
+    },
+    button: {
+      backgroundColor: 'rgba(0, 0, 0, 0.7)',
+      color: 'white',
+      border: 'none',
+      borderRadius: '50%',
+      width: '50px',
+      height: '50px',
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      cursor: 'pointer',
+      fontSize: '20px',
+      boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+    },
+    recordButton: {
+      backgroundColor: isRecording ? 'rgba(255, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+    },
+    downloadButton: {
+      opacity: videoBlob ? 1 : 0.5,
+      pointerEvents: videoBlob ? 'auto' : 'none' as React.CSSProperties['pointerEvents'],
+    }
+  };
+
+  // Clean up animation on unmount
+  useEffect(() => {
+    return () => {
+      if (circleAnimationRef.current) {
+        cancelAnimationFrame(circleAnimationRef.current);
+      }
+    };
+  }, []);
+
+  // Function to handle color change
+  const handleColorChange = (type: 'backgroundColor' | 'circleColor', value: string) => {
+    setConfigSettings(prev => ({
+      ...prev,
+      [type]: value
+    }));
+    
+    // Notify parent component
+    if (type === 'backgroundColor' && onBackgroundColorChange) {
+      onBackgroundColorChange(value);
+    } else if (type === 'circleColor' && onCircleColorChange) {
+      onCircleColorChange(value);
+    }
+  };
+
+  // Function to handle toggle change
+  const handleToggleChange = (type: 'circleAnimationEnabled' | 'showRecordingControls') => {
+    const newValue = !configSettings[type];
+    
+    setConfigSettings(prev => ({
+      ...prev,
+      [type]: newValue
+    }));
+    
+    // Notify parent component
+    if (type === 'circleAnimationEnabled' && onCircleAnimationEnabledChange) {
+      onCircleAnimationEnabledChange(newValue);
+    } else if (type === 'showRecordingControls' && onShowRecordingControlsChange) {
+      onShowRecordingControlsChange(newValue);
+    }
+  };
+
+  // Function to handle slider change
+  const handleSliderChange = (type: 'circleAnimationDuration', value: number) => {
+    setConfigSettings(prev => ({
+      ...prev,
+      [type]: value
+    }));
+    
+    // Notify parent component
+    if (type === 'circleAnimationDuration' && onCircleAnimationDurationChange) {
+      onCircleAnimationDurationChange(value);
+    }
+  };
+
+  // Function to create a style attribute for the toggle slider
+  const getToggleStyles = (toggled: boolean) => {
+    return {
+      position: 'absolute' as const,
+      cursor: 'pointer',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: toggled ? '#f85c2c' : '#ccc',
+      transition: '.4s',
+      borderRadius: '34px',
+      '&:before': {
+        content: '""',
+        position: 'absolute' as const,
+        height: '16px',
+        width: '16px',
+        left: toggled ? '18px' : '2px',
+        bottom: '2px',
+        backgroundColor: 'white',
+        transition: '.4s',
+        borderRadius: '50%',
+      },
+    };
+  };
+
+  // Add a toggle button for the config panel
+  const configButtonStyle = {
+    position: 'absolute' as const,
+    top: '10px',
+    left: '10px',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '50%',
+    width: '40px',
+    height: '40px',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    cursor: 'pointer',
+    fontSize: '20px',
+    boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+    zIndex: 1000,
+  };
+
+  // Styles for the config panel
+  const configPanelStyles = {
+    container: {
+      position: 'absolute' as const,
+      top: '10px',
+      right: '10px',
+      backgroundColor: 'rgba(0, 0, 0, 0.8)',
+      border: '1px solid rgba(255, 255, 255, 0.2)',
+      borderRadius: '10px',
+      padding: '15px',
+      width: '250px',
+      color: 'white',
+      zIndex: 1000,
+      backdropFilter: 'blur(5px)',
+      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
+      transition: 'all 0.3s ease',
+    },
+    title: {
+      margin: '0 0 15px 0',
+      fontSize: '16px',
+      fontWeight: 'bold' as const,
+      textAlign: 'center' as const,
+      borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
+      paddingBottom: '8px',
+    },
+    group: {
+      marginBottom: '12px',
+    },
+    label: {
+      display: 'block',
+      marginBottom: '5px',
+      fontSize: '14px',
+    },
+    colorPicker: {
+      width: '100%',
+      height: '30px',
+      border: 'none',
+      outline: 'none',
+      cursor: 'pointer',
+      backgroundColor: 'transparent',
+    },
+    toggleContainer: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '12px',
+    },
+    toggle: {
+      position: 'relative' as const,
+      width: '40px',
+      height: '20px',
+    },
+    toggleInput: {
+      opacity: 0,
+      width: 0,
+      height: 0,
+    },
+    toggleSlider: {
+      position: 'absolute' as const,
+      cursor: 'pointer',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: '#ccc',
+      transition: '.4s',
+      borderRadius: '34px',
+      '&:before': {
+        position: 'absolute',
+        content: '',
+        height: '16px',
+        width: '16px',
+        left: '2px',
+        bottom: '2px',
+        backgroundColor: 'white',
+        transition: '.4s',
+        borderRadius: '50%',
+      },
+    },
+    rangeContainer: {
+      width: '100%',
+      marginTop: '5px',
+    },
+    rangeInput: {
+      width: '100%',
+      accentColor: '#f85c2c',
+    },
+    rangeValue: {
+      fontSize: '12px',
+      textAlign: 'right' as const,
+      marginTop: '2px',
+    },
+    button: {
+      backgroundColor: '#f85c2c',
+      color: 'white',
+      border: 'none',
+      borderRadius: '5px',
+      padding: '8px 12px',
+      fontSize: '14px',
+      cursor: 'pointer',
+      width: '100%',
+      marginTop: '10px',
+      transition: 'background-color 0.2s',
+      '&:hover': {
+        backgroundColor: '#e64c17',
+      },
+    },
+  };
+
+  // Return the JSX canvas element with recording controls and config panel
   return (
     <div 
       className="growing-ball-game" 
@@ -1992,7 +2505,8 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
         justifyContent: 'center', 
         alignItems: 'center',
         width: '100%',
-        height: '100%'
+        height: '100%',
+        position: 'relative'
       }}
     >
       <canvas 
@@ -2001,7 +2515,7 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
         onMouseUp={handleMouseUp}
         style={{ 
           display: 'block', 
-          background: 'black', 
+          background: configSettings.backgroundColor, 
           touchAction: 'none',
           border: '1px solid rgba(255,255,255,0.2)',
           boxShadow: '0 0 10px rgba(0,0,0,0.5)'
@@ -2011,6 +2525,184 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
         <div style={recordingStyles.container}>
           <div style={recordingStyles.recordIcon}></div>
           <div style={recordingStyles.time}>{formatRecordingTime(recordingTime)}</div>
+        </div>
+      )}
+      {configSettings.showRecordingControls && (
+        <div style={recordingControlsStyles.container}>
+          <button 
+            onClick={toggleRecording} 
+            style={{...recordingControlsStyles.button, ...recordingControlsStyles.recordButton}}
+            title={isRecording ? "Stop Recording" : "Start Recording"}
+          >
+            {isRecording ? '◼' : '⚫'}
+          </button>
+          <button 
+            onClick={handleDownloadVideo} 
+            style={{...recordingControlsStyles.button, ...recordingControlsStyles.downloadButton}}
+            title="Download Video"
+            disabled={!videoBlob}
+          >
+            ⬇️
+          </button>
+        </div>
+      )}
+      <button 
+        onClick={() => setIsConfigPanelVisible(!isConfigPanelVisible)}
+        style={configButtonStyle}
+        title="Settings"
+      >
+        ⚙️
+      </button>
+      {isConfigPanelVisible && (
+        <div style={configPanelStyles.container}>
+          <div style={configPanelStyles.title}>Game Settings</div>
+          
+          <div style={configPanelStyles.group}>
+            <label style={configPanelStyles.label}>Background Color</label>
+            <input 
+              type="color" 
+              value={configSettings.backgroundColor} 
+              onChange={(e) => handleColorChange('backgroundColor', e.target.value)}
+              style={configPanelStyles.colorPicker}
+            />
+          </div>
+          
+          <div style={configPanelStyles.group}>
+            <label style={configPanelStyles.label}>Circle Color</label>
+            <input 
+              type="color" 
+              value={configSettings.circleColor.startsWith('rgba') 
+                ? '#' + configSettings.circleColor.replace(/^rgba\((\d+),\s*(\d+),\s*(\d+).*$/, 
+                   (_, r, g, b) => {
+                     return ((1 << 24) + (parseInt(r) << 16) + (parseInt(g) << 8) + parseInt(b)).toString(16).slice(1);
+                   }) 
+                : configSettings.circleColor}
+              onChange={(e) => handleColorChange('circleColor', e.target.value)}
+              style={configPanelStyles.colorPicker}
+            />
+          </div>
+          
+          <div style={configPanelStyles.toggleContainer}>
+            <span>Circle Animation</span>
+            <label style={configPanelStyles.toggle}>
+              <input 
+                type="checkbox" 
+                checked={configSettings.circleAnimationEnabled} 
+                onChange={() => handleToggleChange('circleAnimationEnabled')}
+                style={configPanelStyles.toggleInput}
+              />
+              <span style={{
+                position: 'absolute',
+                cursor: 'pointer',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: configSettings.circleAnimationEnabled ? '#f85c2c' : '#ccc',
+                transition: '.4s',
+                borderRadius: '34px',
+              }}>
+                <span style={{
+                  position: 'absolute',
+                  content: '""',
+                  height: '16px',
+                  width: '16px',
+                  left: configSettings.circleAnimationEnabled ? '18px' : '2px',
+                  bottom: '2px',
+                  backgroundColor: 'white',
+                  transition: '.4s',
+                  borderRadius: '50%',
+                }}></span>
+              </span>
+            </label>
+          </div>
+          
+          {configSettings.circleAnimationEnabled && (
+            <div style={configPanelStyles.group}>
+              <label style={configPanelStyles.label}>Animation Duration: {configSettings.circleAnimationDuration}ms</label>
+              <div style={configPanelStyles.rangeContainer}>
+                <input 
+                  type="range" 
+                  min="100" 
+                  max="2000" 
+                  step="50" 
+                  value={configSettings.circleAnimationDuration} 
+                  onChange={(e) => handleSliderChange('circleAnimationDuration', parseInt(e.target.value))}
+                  style={configPanelStyles.rangeInput}
+                />
+              </div>
+            </div>
+          )}
+          
+          <div style={configPanelStyles.toggleContainer}>
+            <span>Recording Controls</span>
+            <label style={configPanelStyles.toggle}>
+              <input 
+                type="checkbox" 
+                checked={configSettings.showRecordingControls} 
+                onChange={() => handleToggleChange('showRecordingControls')}
+                style={configPanelStyles.toggleInput}
+              />
+              <span style={{
+                position: 'absolute',
+                cursor: 'pointer',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: configSettings.showRecordingControls ? '#f85c2c' : '#ccc',
+                transition: '.4s',
+                borderRadius: '34px',
+              }}>
+                <span style={{
+                  position: 'absolute',
+                  content: '""',
+                  height: '16px',
+                  width: '16px',
+                  left: configSettings.showRecordingControls ? '18px' : '2px',
+                  bottom: '2px',
+                  backgroundColor: 'white',
+                  transition: '.4s',
+                  borderRadius: '50%',
+                }}></span>
+              </span>
+            </label>
+          </div>
+          
+          <button 
+            style={{
+              backgroundColor: '#f85c2c',
+              color: 'white',
+              border: 'none',
+              borderRadius: '5px',
+              padding: '8px 12px',
+              fontSize: '14px',
+              cursor: 'pointer',
+              width: '100%',
+              marginTop: '10px',
+            }}
+            onClick={() => {
+              // Reset to prop default values
+              const defaultSettings = {
+                backgroundColor,
+                circleColor,
+                circleAnimationEnabled,
+                circleAnimationDuration,
+                showRecordingControls
+              };
+              
+              setConfigSettings(defaultSettings);
+              
+              // Notify parent components
+              if (onBackgroundColorChange) onBackgroundColorChange(backgroundColor);
+              if (onCircleColorChange) onCircleColorChange(circleColor);
+              if (onCircleAnimationEnabledChange) onCircleAnimationEnabledChange(circleAnimationEnabled);
+              if (onCircleAnimationDurationChange) onCircleAnimationDurationChange(circleAnimationDuration);
+              if (onShowRecordingControlsChange) onShowRecordingControlsChange(showRecordingControls);
+            }}
+          >
+            Reset to Default
+          </button>
         </div>
       )}
     </div>
