@@ -25,12 +25,15 @@ interface Particle {
   color: string;
   lifetime: number;  // Durée de vie restante en frames
   maxLifetime: number; // Durée de vie totale en frames
+  initialRadius: number; // Rayon initial pour l'animation de taille
 }
 
 interface Circle {
   id: string;
   radius: number;
   targetRadius: number; // Rayon cible pour l'animation de rétrécissement
+  originalRadius: number; // Rayon original pour calculer l'espacement
+  circleIndex: number; // Index du cercle dans la séquence
   color: string;
   rotation: number;
   rotationSpeed: number;
@@ -44,12 +47,16 @@ interface CollapsingRotatingCirclesProps extends GameProps {
   ballSpeed?: number;
   initialCircleCount?: number;
   circleGap?: number;
+  minCircleGap?: number; // Nouvel espace minimum entre les cercles
   exitSize?: number;
   rotationSpeed?: number;
   ballCount?: number;
   maxBallSpeed?: number;
   shrinkCirclesOnDestroy?: boolean;
   shrinkFactor?: number;
+  effectsEnabled?: boolean;
+  progressiveRotationOffset?: number; // Ajouter ce paramètre pour le décalage progressif
+  ballsOnDestroy?: number; // Nombre de balles à créer quand un cercle est détruit
 }
 
 interface CollapsingRotatingCirclesState {
@@ -69,12 +76,16 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   ballSpeed = 5,
   initialCircleCount = 5,
   circleGap = 40,
+  minCircleGap = 15, // Valeur par défaut pour l'espace minimum
   exitSize = 30, // Angle en degrés
   rotationSpeed = 0.01, // Vitesse de rotation en radians par frame
   ballCount = 1,
   maxBallSpeed = 8, // Vitesse maximale pour limiter les échappées
   shrinkCirclesOnDestroy = true,
-  shrinkFactor = 0.8 // Réduire à 80% à chaque destruction
+  shrinkFactor = 0.8, // Réduire à 80% à chaque destruction
+  effectsEnabled = true, // Activer par défaut
+  progressiveRotationOffset = 0, // 0% par défaut (pas de décalage)
+  ballsOnDestroy = 0 // Par défaut, pas de balles supplémentaires
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
@@ -92,36 +103,55 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   
   // Fonction pour créer des particules lors de la destruction d'un cercle
   const createDestructionParticles = (centerX: number, centerY: number, circleRadius: number, circleColor: string) => {
+    if (!effectsEnabled) return [];
+    
     const particles: Particle[] = [];
-    const particleCount = Math.min(50, Math.max(20, Math.floor(circleRadius / 2))); // Nombre de particules proportionnel au rayon
+    const particleCount = Math.min(150, Math.max(50, Math.floor(circleRadius))); // Augmenter le nombre de particules
     
     for (let i = 0; i < particleCount; i++) {
       // Angle aléatoire pour diffuser les particules dans toutes les directions
       const angle = Math.random() * Math.PI * 2;
-      const distance = Math.random() * circleRadius;
+      const dist = Math.random() * circleRadius;
       
-      // Position basée sur l'angle et la distance (dispersion autour du cercle)
-      const x = centerX + Math.cos(angle) * distance;
-      const y = centerY + Math.sin(angle) * distance;
+      // Position basée sur l'angle et la distance du centre du cercle
+      const x = centerX + Math.cos(angle) * circleRadius;
+      const y = centerY + Math.sin(angle) * circleRadius;
       
-      // Vitesse basée sur l'angle (éjection vers l'extérieur)
-      const speed = 1 + Math.random() * 3;
-      const vx = Math.cos(angle) * speed;
-      const vy = Math.sin(angle) * speed;
+      // Vitesse basée sur l'angle avec composante aléatoire
+      const speedMultiplier = 0.5 + Math.random() * 2;
+      const vx = Math.cos(angle) * speedMultiplier;
+      const vy = Math.sin(angle) * speedMultiplier;
       
-      // Taille et couleur aléatoires
-      const size = 2 + Math.random() * 4;
-      // Couleur légèrement variée basée sur la couleur du cercle
-      const color = circleColor;
+      // Taille variée pour les particules
+      const size = 1 + Math.random() * 6;
+      
+      // Modifier légèrement la couleur du cercle pour chaque particule
+      const hueShift = -20 + Math.random() * 40;
+      const r = parseInt(circleColor.substr(1, 2), 16);
+      const g = parseInt(circleColor.substr(3, 2), 16);
+      const b = parseInt(circleColor.substr(5, 2), 16);
+      
+      // Ajuster légèrement les couleurs
+      const brightness = 0.8 + Math.random() * 0.4;
+      const newR = Math.min(255, Math.max(0, Math.floor(r * brightness)));
+      const newG = Math.min(255, Math.max(0, Math.floor(g * brightness)));
+      const newB = Math.min(255, Math.max(0, Math.floor(b * brightness)));
+      
+      // Convertir en couleur hexadécimale
+      const particleColor = `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`;
+      
+      // Durée de vie plus variée
+      const lifetime = 60 + Math.random() * 120;
       
       particles.push({
         id: generateId(),
         position: { x, y },
         velocity: { x: vx, y: vy },
         radius: size,
-        color,
-        lifetime: 30 + Math.random() * 30, // Entre 30 et 60 frames (0.5-1s à 60fps)
-        maxLifetime: 60
+        initialRadius: size,
+        color: particleColor,
+        lifetime: lifetime,
+        maxLifetime: lifetime
       });
     }
     
@@ -150,17 +180,31 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       });
     }
 
-    // Créer les cercles avec des rotations aléatoires et des vitesses légèrement différentes
+    // Créer les cercles avec des rotations progressivement décalées
     const newCircles: Circle[] = [];
+    const baseRotationSpeed = rotationSpeed;
+    
     for (let i = 0; i < initialCircleCount; i++) {
       const radius = (i + 1) * circleGap + ballRadius;
+      
+      // Calcul du décalage progressif de rotation basé sur l'index du cercle
+      // Convertir le pourcentage en radians (un tour complet = 2*PI radians)
+      const progressiveOffset = (progressiveRotationOffset / 100) * (Math.PI * 2) * i;
+      
+      // Calcul de la vitesse de rotation avec un incrément progressif
+      // Chaque cercle tourne légèrement plus vite que le précédent
+      const speedIncrement = 1 + ((progressiveRotationOffset / 100) * i);
+      const adjustedRotationSpeed = baseRotationSpeed * speedIncrement;
+      
       newCircles.push({
         id: generateId(),
         radius: radius,
         targetRadius: radius, // Initialement, le rayon cible est égal au rayon actuel
+        originalRadius: radius, // Stocker le rayon original pour les calculs d'espacement
         color: getRandomPastelColor(),
-        rotation: Math.random() * Math.PI * 2, // Rotation initiale aléatoire
-        rotationSpeed: rotationSpeed * (1 + (Math.random() * 0.4 - 0.2)), // Variation de vitesse ±20%
+        rotation: progressiveOffset, // Décalage initial basé sur l'index
+        rotationSpeed: adjustedRotationSpeed, // Vitesse de rotation ajustée
+        circleIndex: i, // Stocker l'index du cercle
         isDestroyed: false,
         isFlashing: false
       });
@@ -175,7 +219,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       totalShrinkFactor: 1.0
     });
     playGameStartSound();
-  }, [ballSpeed, initialCircleCount, circleGap, exitSize, rotationSpeed, ballCount, ballRadius]);
+  }, [ballSpeed, initialCircleCount, circleGap, exitSize, rotationSpeed, ballCount, ballRadius, progressiveRotationOffset]);
 
   useEffect(() => {
     if (isPlaying) {
@@ -255,35 +299,71 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       currentParticles = currentParticles
         .map(particle => {
           // Réduire la durée de vie
-          const newLifetime = particle.lifetime - 1;
+          const newLifetime = particle.lifetime - 0.8; // Diminution plus lente
           
           if (newLifetime <= 0) return null; // Supprimer les particules mortes
           
-          // Calculer l'opacité basée sur la durée de vie restante
-          const opacity = newLifetime / particle.maxLifetime;
+          // Calculer l'opacité basée sur la durée de vie restante, avec une courbe plus douce
+          const lifetimeRatio = newLifetime / particle.maxLifetime;
+          // Utiliser une fonction de courbe pour une disparition plus progressive
+          const opacity = Math.pow(lifetimeRatio, 1.5);
           
-          // Mettre à jour la position
+          // Extraire les composantes RGB de la couleur (s'assurer que c'est un format hex)
+          let r, g, b;
+          if (particle.color.startsWith('#')) {
+            r = parseInt(particle.color.substr(1, 2), 16);
+            g = parseInt(particle.color.substr(3, 2), 16);
+            b = parseInt(particle.color.substr(5, 2), 16);
+          } else if (particle.color.startsWith('rgba')) {
+            // Déjà au format rgba, extraire les composantes
+            const rgbaMatch = particle.color.match(/rgba\((\d+),\s*(\d+),\s*(\d+),/);
+            if (rgbaMatch) {
+              r = parseInt(rgbaMatch[1]);
+              g = parseInt(rgbaMatch[2]);
+              b = parseInt(rgbaMatch[3]);
+            } else {
+              // Fallback sur des valeurs par défaut si le format n'est pas reconnu
+              r = 255;
+              g = 255;
+              b = 255;
+            }
+          } else {
+            // Fallback sur des valeurs par défaut
+            r = 255;
+            g = 255;
+            b = 255;
+          }
+          
+          // Mettre à jour la position avec la physique
           const newPosition = {
             x: particle.position.x + particle.velocity.x,
             y: particle.position.y + particle.velocity.y
           };
           
-          // Ralentir les particules progressivement
-          const friction = 0.98;
+          // Physique plus réaliste avec gravité et inertie
+          const friction = 0.98; // Résistance de l'air légère
+          const gravity = 0.1; // Force de gravité plus prononcée
+          
+          // Ajouter un mouvement aléatoire pour plus de naturel
+          const randomX = (Math.random() - 0.5) * 0.2;
+          const randomY = (Math.random() - 0.5) * 0.2;
+          
           const newVelocity = {
-            x: particle.velocity.x * friction,
-            y: particle.velocity.y * friction
+            x: (particle.velocity.x * friction) + randomX,
+            y: (particle.velocity.y * friction) + gravity + randomY
           };
+          
+          // Réduire progressivement la taille de la particule
+          const sizeRatio = 0.5 + lifetimeRatio * 0.5; // Réduire jusqu'à 50% de la taille d'origine
+          const newRadius = particle.initialRadius * sizeRatio;
           
           return {
             ...particle,
             position: newPosition,
             velocity: newVelocity,
             lifetime: newLifetime,
-            color: `rgba(${parseInt(particle.color.substr(1, 2), 16)}, 
-                         ${parseInt(particle.color.substr(3, 2), 16)}, 
-                         ${parseInt(particle.color.substr(5, 2), 16)}, 
-                         ${opacity})`
+            radius: newRadius,
+            color: `rgba(${r}, ${g}, ${b}, ${opacity})`
           };
         })
         .filter(Boolean) as Particle[]; // Supprimer les particules nulles (mortes)
@@ -363,27 +443,44 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                 );
                 currentParticles.push(...newParticles);
                 
+                // Créer de nouvelles balles si l'option est activée
+                if (ballsOnDestroy > 0) {
+                  const newBalls = createBallsOnDestroy(centerX, centerY, circle.radius);
+                  currentBalls.push(...newBalls);
+                }
+                
                 // Si le rétrécissement est activé, calculer les nouveaux rayons cibles
                 if (shrinkCirclesOnDestroy) {
                   // Réduire encore le facteur global de rétrécissement
                   totalShrinkFactor *= shrinkFactor;
                   
-                  // Appliquer à tous les cercles non détruits
-                  currentCircles.forEach(otherCircle => {
-                    if (!otherCircle.isDestroyed) {
-                      // Le rayon original est basé sur l'index du cercle (comme à l'initialisation)
-                      const originalRadius = (currentCircles.indexOf(otherCircle) + 1) * circleGap + ballRadius;
-                      
-                      // Appliquer le facteur de rétrécissement global
-                      const newTargetRadius = Math.max(
-                        ballRadius * 2, // Minimum pour la jouabilité
-                        originalRadius * totalShrinkFactor
-                      );
-                      
-                      // Définir le nouveau rayon cible et activer le flash
-                      otherCircle.targetRadius = newTargetRadius;
-                      otherCircle.isFlashing = true;
-                    }
+                  // Trier les cercles non détruits par ordre croissant d'index
+                  const activeCirlces = currentCircles
+                    .filter(c => !c.isDestroyed)
+                    .sort((a, b) => a.circleIndex - b.circleIndex);
+                  
+                  // Calculer les nouveaux rayons en maintenant un espacement minimum
+                  let previousRadius = 0; // Point de départ (centre)
+                  
+                  activeCirlces.forEach((circle, idx) => {
+                    // Calculer le rayon idéal basé sur le rétrécissement global
+                    const idealRadius = circle.originalRadius * totalShrinkFactor;
+                    
+                    // Calculer le rayon minimum basé sur le rayon précédent et l'espacement minimum
+                    const minRadiusFromGap = previousRadius + minCircleGap + ballRadius;
+                    
+                    // Prendre le maximum entre le rayon idéal et le rayon minimum requis
+                    const newTargetRadius = Math.max(
+                      idealRadius, 
+                      minRadiusFromGap
+                    );
+                    
+                    // Définir le nouveau rayon cible et activer le flash
+                    circle.targetRadius = newTargetRadius;
+                    circle.isFlashing = true;
+                    
+                    // Mettre à jour le rayon précédent pour le prochain cercle
+                    previousRadius = newTargetRadius;
                   });
                 }
               }
@@ -459,12 +556,14 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         
         // Dessiner l'arc principal (cercle moins la porte de sortie)
         ctx.beginPath();
+        // Assurer que les deux arcs s'alignent correctement
+        const fullCircle = Math.PI * 2;
         ctx.arc(
           centerX, 
           centerY, 
           circle.radius, 
           circle.rotation + exitSizeRad, // Début de l'arc après la porte
-          circle.rotation + Math.PI * 2, // Tour complet
+          circle.rotation + fullCircle, // Tour complet
           false
         );
         ctx.strokeStyle = circleColor;
@@ -498,6 +597,11 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         );
         ctx.fillStyle = particle.color;
         ctx.fill();
+        
+        // Ajouter un léger contour pour plus de définition
+        ctx.strokeStyle = `rgba(255, 255, 255, ${particle.lifetime / particle.maxLifetime * 0.3})`;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
       });
 
       // Dessiner les balles
@@ -560,7 +664,38 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         requestRef.current = undefined;
       }
     };
-  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, ballRadius, circleGap]);
+  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, ballRadius, circleGap, minCircleGap, ballsOnDestroy]);
+
+  // Fonction pour créer de nouvelles balles à l'emplacement d'un cercle détruit
+  const createBallsOnDestroy = (centerX: number, centerY: number, circleRadius: number): Ball[] => {
+    if (ballsOnDestroy <= 0) return [];
+    
+    const newBalls: Ball[] = [];
+    
+    for (let i = 0; i < ballsOnDestroy; i++) {
+      // Angle aléatoire pour la direction de la balle
+      const angle = Math.random() * Math.PI * 2;
+      
+      // Position sur le cercle détruit
+      const posX = centerX + Math.cos(angle) * circleRadius * 0.8;
+      const posY = centerY + Math.sin(angle) * circleRadius * 0.8;
+      
+      // Vitesse initiale légèrement orientée vers l'extérieur
+      const speed = 1 + Math.random() * 3; // Vitesse modérée pour ne pas sortir trop vite
+      const velX = Math.cos(angle) * speed;
+      const velY = Math.sin(angle) * speed;
+      
+      newBalls.push({
+        id: generateId(),
+        position: { x: posX, y: posY },
+        velocity: { x: velX, y: velY },
+        radius: ballRadius,
+        color: getRandomPastelColor()
+      });
+    }
+    
+    return newBalls;
+  };
 
   return (
     <canvas

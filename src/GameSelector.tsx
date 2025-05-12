@@ -200,6 +200,20 @@ const GameSelector: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   
+  // Ajout de l'état pour le décalage progressif des portes
+  const [progressiveRotationOffset, setProgressiveRotationOffset] = useState(0); // 0% par défaut
+
+  // Ajout de l'état pour le nombre de balles à créer lors de la destruction d'un cercle
+  const [ballsOnDestroy, setBallsOnDestroy] = useState(0); // 0 par défaut
+
+  // Ajout de l'état pour l'espace minimum entre les cercles
+  const [minCircleGap, setMinCircleGap] = useState(15);
+
+  // Fonction pour gérer le changement de l'espace minimum entre les cercles
+  const handleMinCircleGapChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMinCircleGap(parseInt(e.target.value));
+  };
+
   // Initialisation des références pour les éléments d'upload
   useEffect(() => {
     soundTypes.forEach(type => {
@@ -228,6 +242,12 @@ const GameSelector: React.FC = () => {
   };
   
   const handleStartGame = () => {
+    // Vérifier qu'un jeu est sélectionné avant de commencer
+    if (!selectedGame) {
+      console.error("Tentative de démarrer un jeu alors qu'aucun n'est sélectionné");
+      return;
+    }
+    
     // Arrêter tous les sons avant de démarrer le jeu
     stopAllSounds();
     
@@ -249,11 +269,8 @@ const GameSelector: React.FC = () => {
     }
     
     // Reset game state before starting
-    setIsPlaying(false);
-    setTimeout(() => {
-      setIsPlaying(true);
-      playGameStartSound();
-    }, 100);
+    setIsPlaying(true);
+    playGameStartSound();
   };
   
   const handleStopGame = () => {
@@ -275,7 +292,7 @@ const GameSelector: React.FC = () => {
     setTimeout(() => {
       setIsPlaying(true);
       playGameStartSound();
-    }, 200); // Slightly longer delay for more reliable reset
+    }, 300); // Un délai plus long pour assurer une réinitialisation complète
   };
   
   const handleGameEnd = () => {
@@ -320,6 +337,10 @@ const GameSelector: React.FC = () => {
   const handleRotationSpeedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const speed = parseFloat(e.target.value);
     setRotationSpeed(speed);
+  };
+  
+  const handleProgressiveRotationOffsetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setProgressiveRotationOffset(parseFloat(e.target.value));
   };
   
   const handleBallCountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -853,12 +874,16 @@ const GameSelector: React.FC = () => {
             ballSpeed={ballSpeed}
             initialCircleCount={initialCircleCount}
             circleGap={circleGap}
+            minCircleGap={minCircleGap}
             exitSize={exitSize}
             rotationSpeed={rotationSpeed}
             ballCount={ballCount}
             maxBallSpeed={maxBallSpeed}
             shrinkCirclesOnDestroy={shrinkCirclesOnDestroy}
             shrinkFactor={shrinkFactor}
+            effectsEnabled={effectsEnabled}
+            progressiveRotationOffset={progressiveRotationOffset}
+            ballsOnDestroy={ballsOnDestroy}
           />
         );
 
@@ -920,7 +945,13 @@ const GameSelector: React.FC = () => {
           {!isPlaying ? (
             <button 
               className="control-button start"
-              onClick={handleStartGame}
+              onClick={() => {
+                if (selectedGame) {
+                  handleStartGame();
+                } else {
+                  console.error("Aucun jeu sélectionné");
+                }
+              }}
             >
               Démarrer
             </button>
@@ -939,6 +970,20 @@ const GameSelector: React.FC = () => {
                 Réinitialiser
               </button>
             </>
+          )}
+          
+          {/* Ajout d'un bouton pour retourner à la sélection de jeu */}
+          {selectedGame && !isPlaying && (
+            <button 
+              className="control-button back"
+              onClick={() => setSelectedGame(null)}
+              style={{
+                marginTop: '10px',
+                backgroundColor: '#555'
+              }}
+            >
+              Retour à la sélection
+            </button>
           )}
         </div>
         
@@ -2111,7 +2156,7 @@ const GameSelector: React.FC = () => {
           <input 
             type="range" 
             min="2" 
-            max="15" 
+            max="100" 
             step="1" 
             value={initialCircleCount}
             onChange={handleInitialCircleCountChange}
@@ -2122,8 +2167,8 @@ const GameSelector: React.FC = () => {
           <label>Espace entre les cercles: {circleGap}px</label>
           <input 
             type="range" 
-            min="20" 
-            max="80" 
+            min="15" 
+            max="100" 
             step="5" 
             value={circleGap}
             onChange={handleCircleGapChange}
@@ -2131,11 +2176,26 @@ const GameSelector: React.FC = () => {
         </div>
         
         <div className="control">
+          <label>Espace minimum entre cercles: {minCircleGap}px</label>
+          <input 
+            type="range" 
+            min="5" 
+            max="50" 
+            step="1" 
+            value={minCircleGap}
+            onChange={handleMinCircleGapChange}
+          />
+          <div className="control-hint">
+            Espace minimum préservé même après rétrécissement (évite le chevauchement)
+          </div>
+        </div>
+        
+        <div className="control">
           <label>Taille de la porte: {exitSize}°</label>
           <input 
             type="range" 
-            min="10" 
-            max="120" 
+            min="5" 
+            max="180" 
             step="5" 
             value={exitSize}
             onChange={handleExitSizeChange}
@@ -2147,7 +2207,7 @@ const GameSelector: React.FC = () => {
           <input 
             type="range" 
             min="0.001" 
-            max="0.05" 
+            max="0.1" 
             step="0.001" 
             value={rotationSpeed}
             onChange={handleRotationSpeedChange}
@@ -2155,11 +2215,41 @@ const GameSelector: React.FC = () => {
         </div>
         
         <div className="control">
+          <label>Décalage progressif: {progressiveRotationOffset}%</label>
+          <input 
+            type="range" 
+            min="0" 
+            max="20" 
+            step="1" 
+            value={progressiveRotationOffset}
+            onChange={handleProgressiveRotationOffsetChange}
+          />
+          <div className="control-hint">
+            Crée un motif en spirale en décalant chaque cercle et sa vitesse de rotation (0% = tous alignés)
+          </div>
+        </div>
+        
+        <div className="control">
+          <label>Balles créées par destruction: {ballsOnDestroy}</label>
+          <input 
+            type="range" 
+            min="0" 
+            max="5" 
+            step="1" 
+            value={ballsOnDestroy}
+            onChange={handleBallsOnDestroyChange}
+          />
+          <div className="control-hint">
+            Nombre de balles à créer lorsqu'un cercle est détruit (0 = aucune)
+          </div>
+        </div>
+        
+        <div className="control">
           <label>Vitesse maximale de la balle: {maxBallSpeed.toFixed(1)}</label>
           <input 
             type="range" 
             min="5" 
-            max="15" 
+            max="20" 
             step="0.5" 
             value={maxBallSpeed}
             onChange={handleMaxBallSpeedChange}
@@ -2189,9 +2279,9 @@ const GameSelector: React.FC = () => {
             <label>Taille après rétrécissement: {Math.round(shrinkFactor * 100)}%</label>
             <input 
               type="range" 
-              min="0.4" 
-              max="0.8" 
-              step="0.05" 
+              min="0.3" 
+              max="0.99" 
+              step="0.01" 
               value={shrinkFactor}
               onChange={handleShrinkFactorChange}
             />
@@ -2267,6 +2357,11 @@ const GameSelector: React.FC = () => {
         </button>
       </div>
     );
+  };
+  
+  // Fonction pour gérer le changement du nombre de balles à créer
+  const handleBallsOnDestroyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBallsOnDestroy(parseInt(e.target.value));
   };
   
   // Render function for the main component with sidebar layout
