@@ -1590,65 +1590,19 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
     }
   };
 
-  // Fonction pour basculer l'enregistrement
+  // Actual recording toggle implementation
   const handleRecordingToggle = () => {
     if (isRecording) {
       console.log('Stopping recording...');
-      
-      // Add a loading indicator or disable the button during processing
-      const downloadButton = document.querySelector('[title="Télécharger la vidéo"]') as HTMLButtonElement;
-      if (downloadButton) {
-        downloadButton.disabled = true;
-        downloadButton.style.opacity = '0.5';
-        downloadButton.style.cursor = 'wait';
-      }
-      
-      // Add a timeout to ensure the recording stops even if the promise doesn't resolve
-      const stopTimeout = setTimeout(() => {
-        console.warn("Force stopping recording after timeout");
-        if (isRecording) {
-          // Force cleanup without needing to set state directly
-          console.log("Recording taking too long to stop, forcing cleanup...");
-          // Re-enable the download button if it exists
-          if (downloadButton) {
-            downloadButton.disabled = false;
-            downloadButton.style.opacity = '1';
-            downloadButton.style.cursor = 'pointer';
-          }
+      stopRecording().then(blob => {
+        if (blob) {
+          console.log('Recording stopped successfully, blob size:', blob.size);
+        } else {
+          console.error('Recording stopped but no blob was created');
         }
-      }, 5000); // 5 second timeout
-      
-      stopRecording()
-        .then(blob => {
-          clearTimeout(stopTimeout);
-          if (blob) {
-            console.log(`Enregistrement terminé, taille: ${blob.size} bytes`);
-            if (blob.size < 1000) {
-              console.warn("Warning: Recorded blob is very small, may be incomplete");
-            }
-          } else {
-            console.error("Stop recording returned no blob.");
-          }
-          
-          // Re-enable the download button if it exists
-          if (downloadButton) {
-            downloadButton.disabled = false;
-            downloadButton.style.opacity = '1';
-            downloadButton.style.cursor = 'pointer';
-          }
-        })
-        .catch(error => {
-          clearTimeout(stopTimeout);
-          console.error("Erreur lors de l'arrêt de l'enregistrement:", error);
-          alert(`Erreur lors de l'arrêt de l'enregistrement: ${error.message || 'Raison inconnue'}`);
-          
-          // Re-enable the download button if it exists
-          if (downloadButton) {
-            downloadButton.disabled = false;
-            downloadButton.style.opacity = '1';
-            downloadButton.style.cursor = 'pointer';
-          }
-        });
+      }).catch(err => {
+        console.error('Error stopping recording:', err);
+      });
     } else {
       if (canvasRef.current) {
         console.log('Starting recording with audio capture...');
@@ -1660,60 +1614,21 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
           console.log('Reconnected audio system to recorder');
         }
         
-        // Update recording duration to 5 minutes
-        const maxRecordingDuration = 300000; // 5 minutes
-        
-        // Check if canvas exists before starting recording
-        if (!canvasRef.current) {
-          console.error("Canvas reference is null, cannot start recording");
-          alert("Cannot start recording - canvas not found");
-          return;
-        }
-        
-        // Use type assertion since we've already checked for null
-        const canvas = canvasRef.current as HTMLCanvasElement;
-        
-        startRecording(canvas, maxRecordingDuration, {
-          frameRate: 60,
-          videoBitsPerSecond: 8000000, // 8 Mbps for better stability with longer recordings
-          captureAudio: true
-        }).catch(error => {
-          console.error("Échec du démarrage de l'enregistrement:", error);
-          
-          // Fallback to more compatible settings
-          startRecording(canvas, maxRecordingDuration, {
-            frameRate: 30, // Lower framerate for compatibility
-            videoBitsPerSecond: 5000000, // 5 Mbps for compatibility
-            captureAudio: true
-          }).catch(fallbackError => {
-            console.error("Échec du démarrage de l'enregistrement avec paramètres de secours:", fallbackError);
-            alert("Impossible de démarrer l'enregistrement. Vérifiez les autorisations du navigateur ou réessayez.");
-          });
+        // Use more stable settings for better compatibility
+        startRecording(canvasRef.current, 60000, {
+          frameRate: 30, // Lower to 30fps for stability
+          videoBitsPerSecond: 3000000, // 3 Mbps for better compatibility
+          captureAudio: true // Enable audio capture
+        }).catch(err => {
+          console.error('Failed to start recording:', err);
+          alert('Recording failed to start. Please try again.');
         });
       }
     }
   };
 
-  // Fonction pour télécharger la vidéo
   const handleDownloadVideo = () => {
-    if (!videoBlob) {
-      alert("Aucune vidéo disponible pour le téléchargement");
-      return;
-    }
-    
-    if (videoBlob.size === 0) {
-      alert("L'enregistrement est vide. Veuillez réessayer.");
-      return;
-    }
-    
-    try {
-      const filename = `growing-ball-${new Date().getTime()}.webm`;
-      console.log(`Téléchargement de la vidéo (${(videoBlob.size / 1024 / 1024).toFixed(2)} MB) sous le nom ${filename}`);
-      downloadGameplayVideo(filename);
-    } catch (error) {
-      console.error("Erreur lors du téléchargement de la vidéo:", error);
-      alert("Erreur lors du téléchargement. Veuillez réessayer.");
-    }
+    downloadGameplayVideo(`tiktok-game-${new Date().getTime()}.webm`);
   };
 
   // Fonction pour créer un effet visuel sur le canvas lors des collisions

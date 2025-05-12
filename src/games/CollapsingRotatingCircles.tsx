@@ -872,9 +872,9 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                       const audioElement = new Audio(URL.createObjectURL(customExitSound));
                       audioElement.volume = customExitSoundVolume;
                       audioElement.play().catch(e => console.error("Erreur lors de la lecture du son personnalisé:", e));
-                    } else {
+                } else {
                       // Standard sound
-                      playRandomSound();
+                  playRandomSound();
                     }
                   }
                 }
@@ -1363,61 +1363,16 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
 
     if (isRecordingActive) {
       console.log("Arrêt de l'enregistrement...");
-      
-      // Add a loading indicator or disable the button during processing
-      const downloadButton = document.querySelector('[title="Télécharger la vidéo"]') as HTMLButtonElement;
-      if (downloadButton) {
-        downloadButton.disabled = true;
-        downloadButton.style.opacity = '0.5';
-        downloadButton.style.cursor = 'wait';
-      }
-      
-      // Add a timeout to ensure the recording stops even if the promise doesn't resolve
-      const stopTimeout = setTimeout(() => {
-        console.warn("Force stopping recording after timeout");
-        if (isRecordingActive) {
-          // Force cleanup without needing to set state directly
-          console.log("Recording taking too long to stop, forcing cleanup...");
-          // Re-enable the download button if it exists
-          const downloadButton = document.querySelector('[title="Télécharger la vidéo"]') as HTMLButtonElement;
-          if (downloadButton) {
-            downloadButton.disabled = false;
-            downloadButton.style.opacity = '1';
-            downloadButton.style.cursor = 'pointer';
-          }
-        }
-      }, 5000); // 5 second timeout
-      
       stopRecording()
-        .then(blob => {
-          clearTimeout(stopTimeout);
-          if (blob) {
+      .then(blob => {
+        if (blob) {
             console.log(`Enregistrement terminé, taille: ${blob.size} bytes`);
-            if (blob.size < 1000) {
-              console.warn("Warning: Recorded blob is very small, may be incomplete");
-            }
-          } else {
+        } else {
             console.error("Stop recording returned no blob.");
-          }
-          
-          // Re-enable the download button if it exists
-          if (downloadButton) {
-            downloadButton.disabled = false;
-            downloadButton.style.opacity = '1';
-            downloadButton.style.cursor = 'pointer';
-          }
-        })
-        .catch(error => {
-          clearTimeout(stopTimeout);
+        }
+      })
+      .catch(error => {
           console.error("Erreur lors de l'arrêt de l'enregistrement:", error);
-          alert(`Erreur lors de l'arrêt de l'enregistrement: ${error.message || 'Raison inconnue'}`);
-          
-          // Re-enable the download button if it exists
-          if (downloadButton) {
-            downloadButton.disabled = false;
-            downloadButton.style.opacity = '1';
-            downloadButton.style.cursor = 'pointer';
-          }
         });
     } else {
       console.log("Démarrage de l'enregistrement avec capture audio...");
@@ -1428,11 +1383,6 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         // Connect the sound system to the recorder
         console.log("Connexion du système audio à l'enregistreur...");
         // The hook will handle this internally
-        
-        // Ensure the audio context is running
-        if (soundCtx.state === 'suspended') {
-          soundCtx.resume().catch(e => console.warn("Could not resume audio context:", e));
-        }
       } else {
         console.error("Contexte audio non disponible pour l'enregistrement. L'audio ne sera pas enregistré.");
       }
@@ -1440,26 +1390,23 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       // High quality recording options
       const recordingOptions = {
         frameRate: 60, // Higher frame rate for smoother motion
-        videoBitsPerSecond: 8000000, // Reduced from 20Mbps to 8Mbps for better stability with long recordings
+        videoBitsPerSecond: 20000000, // ULTRA QUALITY: 20 Mbps for maximum detail
         captureAudio: true
       };
       
-      // Increase max recording duration to 5 minutes (300,000 ms) from the default 60,000 ms
-      const maxRecordingDuration = 300000; // 5 minutes
-      
-      // Start recording using the hook's function with updated settings
-      startRecording(canvas, maxRecordingDuration, recordingOptions)
+      // Start recording using the hook's function with maximum quality settings
+      startRecording(canvas, 60000, recordingOptions)
         .catch(error => {
           console.error("Échec du démarrage de l'enregistrement:", error);
           
-          // Fallback to default codec with lower bitrate for better compatibility
+          // Fallback to default codec with slightly lower bitrate but still high quality
           const fallbackOptions = {
-            frameRate: 30, // Lower framerate for compatibility
-            videoBitsPerSecond: 5000000, // 5 Mbps for better compatibility
+            frameRate: 60,
+            videoBitsPerSecond: 15000000, // Still high quality in fallback
             captureAudio: true
           };
           
-          startRecording(canvas, maxRecordingDuration, fallbackOptions)
+          startRecording(canvas, 60000, fallbackOptions)
             .catch(fallbackError => {
               console.error("Échec du démarrage de l'enregistrement avec paramètres de secours:", fallbackError);
               alert("Impossible de démarrer l'enregistrement. Vérifiez les autorisations du navigateur ou réessayez.");
@@ -1470,23 +1417,9 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   
   // Fonction pour télécharger la vidéo
   const handleDownloadVideo = () => {
-    if (!videoBlob) {
-      alert("Aucune vidéo disponible pour le téléchargement");
-      return;
-    }
-    
-    if (videoBlob.size === 0) {
-      alert("L'enregistrement est vide. Veuillez réessayer.");
-      return;
-    }
-    
-    try {
+    if (videoBlob) {
       const filename = `cercles-game-${new Date().getTime()}.webm`;
-      console.log(`Téléchargement de la vidéo (${(videoBlob.size / 1024 / 1024).toFixed(2)} MB) sous le nom ${filename}`);
       downloadGameplayVideo(filename);
-    } catch (error) {
-      console.error("Erreur lors du téléchargement de la vidéo:", error);
-      alert("Erreur lors du téléchargement. Veuillez réessayer.");
     }
   };
 
@@ -1506,33 +1439,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         </div>
       )}
       {/* Ajouter les contrôles d'enregistrement */}
-      {showRecordingControls && (
-        <div style={recordingControlsStyles.container}>
-          <button 
-            onClick={toggleRecording} 
-          style={{ 
-              ...recordingControlsStyles.button, 
-              ...recordingControlsStyles.recordButton
-            }}
-            title={isRecordingActive ? "Arrêter l'enregistrement" : "Commencer l'enregistrement"}
-          >
-            {isRecordingActive ? '◼' : '⚫'}
-          </button>
-          <button 
-            onClick={handleDownloadVideo} 
-            style={{
-              ...recordingControlsStyles.button, 
-              ...recordingControlsStyles.downloadButton,
-              opacity: videoBlob ? 1 : 0.5,
-              cursor: videoBlob ? 'pointer' : 'not-allowed'
-            }}
-            title="Télécharger la vidéo"
-            disabled={!videoBlob}
-          >
-            ⬇️
-          </button>
-        </div>
-      )}
+   
     </div>
   );
 };

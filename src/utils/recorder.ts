@@ -10,7 +10,7 @@ class GameRecorder {
   private canvas: HTMLCanvasElement | null = null;
   private isRecording = false;
   private recordingStartTime = 0;
-  private maxDuration = 300000; // 5 minutes default max duration
+  private maxDuration = 60000; // 60 seconds default max duration
   private audioContext: AudioContext | null = null;
   private audioDestination: MediaStreamAudioDestinationNode | null = null;
 
@@ -206,19 +206,10 @@ class GameRecorder {
         // Handle data available event
         this.mediaRecorder.ondataavailable = (event) => {
           if (event.data && event.data.size > 0) {
-            // Log chunk sizes periodically to monitor recording progress
-            if (this.recordedChunks.length % 10 === 0) {
-              console.log(`Received ${this.recordedChunks.length} chunks, latest size: ${event.data.size} bytes`);
-            }
+            //console.log(`Received chunk of size: ${event.data.size} bytes`);
             this.recordedChunks.push(event.data);
-            
-            // Check if we're accumulating too much data (more than 1GB)
-            const totalSize = this.recordedChunks.reduce((acc, chunk) => acc + chunk.size, 0);
-            if (totalSize > 1000000000) { // 1GB
-              console.warn('Recording exceeding 1GB data limit, consider stopping');
-            }
           } else {
-            console.warn('Received empty data chunk');
+            //console.warn('Received empty data chunk');
           }
         };
 
@@ -228,8 +219,8 @@ class GameRecorder {
           reject(new Error('MediaRecorder error'));
         };
 
-        // Start recording - request data every 2 seconds for longer recordings
-        this.mediaRecorder.start(2000); // Request data every 2 seconds for better management of larger recordings
+        // Start recording - request data more frequently for reliability
+        this.mediaRecorder.start(500); // Request data every 500ms
         this.isRecording = true;
         this.recordingStartTime = Date.now();
 
@@ -262,37 +253,13 @@ class GameRecorder {
         return;
       }
 
-      // Add timeout to prevent hanging on stop
-      const stopTimeout = setTimeout(() => {
-        console.warn('MediaRecorder.stop() is taking too long, forcing cleanup');
-        this.isRecording = false;
-        if (this.recordedChunks.length > 0) {
-          // Try to create a blob with what we have
-          try {
-            const mimeType = this.getSupportedMimeType() || 'video/webm';
-            const blob = new Blob(this.recordedChunks, { type: mimeType });
-            resolve(blob);
-          } catch (err) {
-            reject(new Error('Failed to create video blob after timeout'));
-          }
-        } else {
-          reject(new Error('Recording timeout with no data'));
-        }
-      }, 10000); // 10 second timeout
-
       // Request final data chunk before stopping
       if (this.mediaRecorder.state === 'recording') {
-        try {
-          this.mediaRecorder.requestData();
-        } catch (e) {
-          console.warn('Error requesting final data:', e);
-        }
+        this.mediaRecorder.requestData();
       }
 
       // Create handler for when recording stops
       this.mediaRecorder.onstop = () => {
-        clearTimeout(stopTimeout);
-        
         if (this.recordedChunks.length === 0) {
           console.error('No data was recorded');
           reject(new Error('No data was recorded'));
@@ -300,47 +267,28 @@ class GameRecorder {
         }
 
         console.log(`Creating blob from ${this.recordedChunks.length} chunks`);
-        try {
-          const mimeType = this.getSupportedMimeType() || 'video/webm';
-          const blob = new Blob(this.recordedChunks, { type: mimeType });
-          console.log(`Created blob of size: ${blob.size} bytes`);
-          
-          this.isRecording = false;
-          
-          // Clean up streams to free resources
-          if (this.stream) {
-            this.stream.getTracks().forEach(track => {
-              try {
-                track.stop();
-              } catch (e) {
-                console.warn('Error stopping track:', e);
-              }
-            });
-            this.stream = null;
-          }
-          
-          resolve(blob);
-        } catch (error) {
-          console.error('Failed to create blob:', error);
-          reject(error);
+        
+        // Create a blob from all recorded chunks with proper MIME type
+        const mimeType = this.mediaRecorder ? this.mediaRecorder.mimeType : 'video/webm';
+        const blob = new Blob(this.recordedChunks, {
+          type: mimeType || 'video/webm'
+        });
+        
+        console.log(`Created blob of size: ${blob.size} bytes`);
+
+        // Clean up
+        this.isRecording = false;
+        if (this.stream) {
+          this.stream.getTracks().forEach(track => track.stop());
+          this.stream = null;
         }
+        this.mediaRecorder = null;
+
+        resolve(blob);
       };
 
-      // Handle errors during stop
-      this.mediaRecorder.onerror = (event) => {
-        clearTimeout(stopTimeout);
-        console.error('MediaRecorder error during stop:', event);
-        reject(new Error('MediaRecorder error during stop'));
-      };
-
-      // Attempt to stop the recorder
-      try {
-        this.mediaRecorder.stop();
-      } catch (error) {
-        clearTimeout(stopTimeout);
-        console.error('Error stopping MediaRecorder:', error);
-        reject(error);
-      }
+      // Stop the media recorder
+      this.mediaRecorder.stop();
     });
   }
 
