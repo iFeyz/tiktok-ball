@@ -28,6 +28,9 @@ export interface Ball {
   velocity: Vector2D;
   radius: number;
   color: string;
+  image?: HTMLImageElement | null;
+  imageIndex?: number;
+  creatorBall?: Ball | null;
 }
 
 export interface GameState {
