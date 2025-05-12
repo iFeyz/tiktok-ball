@@ -450,7 +450,10 @@ const GameSelector: React.FC = () => {
   };
   
   const handleCustomSoundsToggle = () => {
-    setUseCustomSounds(!useCustomSounds);
+    const newValue = !useCustomSounds;
+    setUseCustomSounds(newValue);
+    // Synchroniser également l'état pour les sons des cercles rotatifs
+    setUseCirclesCustomSounds(newValue);
   };
   
   const handleImageAssignmentToggle = () => {
@@ -875,7 +878,12 @@ const GameSelector: React.FC = () => {
   const [remainingCirclesTextColor, setRemainingCirclesTextColor] = useState<string>("#000000");
 
   // Variable pour gérer l'utilisation de sons personnalisés pour les cercles
-  const [useCirclesCustomSounds, setUseCirclesCustomSounds] = useState<boolean>(false);
+  const [useCirclesCustomSounds, setUseCirclesCustomSounds] = useState<boolean>(useCustomSounds);
+  
+  // Assurer que les deux états restent synchronisés
+  useEffect(() => {
+    setUseCirclesCustomSounds(useCustomSounds);
+  }, [useCustomSounds]);
 
   // Add state for recording
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -1109,9 +1117,7 @@ const GameSelector: React.FC = () => {
         </div>
         
         {/* Display the game */}
-        <div className="game-display">
-          {renderGame()}
-        </div>
+   
         
         {/* Display appropriate settings based on game type */}
         <div className="game-settings-panel">
@@ -2777,8 +2783,38 @@ const GameSelector: React.FC = () => {
   const handleExitSoundUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      setCustomExitSound(file);
-      console.log("Son de passage de porte chargé:", file.name);
+      
+      // Vérifier que c'est bien un fichier audio
+      if (!file.type.startsWith('audio/')) {
+        alert('Veuillez sélectionner un fichier audio valide.');
+        return;
+      }
+      
+      // Vérifier si le format est supporté (MP3, WAV, OGG, M4A, AAC)
+      const supportedFormats = ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/aac', 'audio/x-m4a'];
+      if (!supportedFormats.includes(file.type) && !file.type.startsWith('audio/')) {
+        console.warn(`Format de fichier potentiellement non supporté: ${file.type}. On essaie quand même.`);
+      }
+      
+      // Créer un objet URL pour précharger et tester le fichier audio
+      const audioUrl = URL.createObjectURL(file);
+      const audioTest = new Audio(audioUrl);
+      
+      // Vérifier si le fichier peut être lu
+      audioTest.addEventListener('canplaythrough', () => {
+        console.log(`Son de passage de porte chargé avec succès: ${file.name}`);
+        setCustomExitSound(file);
+        URL.revokeObjectURL(audioUrl);
+      });
+      
+      audioTest.addEventListener('error', () => {
+        console.error(`Erreur lors du chargement du son: ${file.name}`);
+        alert('Ce fichier audio ne peut pas être lu. Veuillez essayer un autre format.');
+        URL.revokeObjectURL(audioUrl);
+      });
+      
+      // Démarrer le chargement pour tester
+      audioTest.load();
     }
   };
 

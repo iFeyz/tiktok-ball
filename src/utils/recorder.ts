@@ -110,6 +110,8 @@ class GameRecorder {
    * @param canvas The canvas element to record
    * @param maxDurationMs Maximum recording duration in milliseconds (default: 60000ms)
    * @param options Additional recording options
+   * @param audioContextOverride Override internal audio context (used by hook)
+   * @param audioDestinationOverride Override internal audio destination (used by hook)
    * @returns Promise that resolves when recording starts
    */
   async startRecording(
@@ -119,7 +121,9 @@ class GameRecorder {
       frameRate: 60,
       videoBitsPerSecond: 5000000, // 5 Mbps
       captureAudio: true
-    }
+    },
+    audioContextOverride: AudioContext | null = null,
+    audioDestinationOverride: MediaStreamAudioDestinationNode | null = null
   ): Promise<void> {
     return new Promise(async (resolve, reject) => {
       try {
@@ -131,45 +135,51 @@ class GameRecorder {
           reject(new Error('Canvas element is required'));
           return;
         }
+        
+        // Use overrides if provided (from the hook)
+        const currentAudioContext = audioContextOverride || this.audioContext;
+        const currentAudioDestination = audioDestinationOverride || this.audioDestination;
 
         // Get the stream from the canvas with higher framerate
         const frameRate = options.frameRate || 60;
         const videoStream = canvas.captureStream(frameRate);
         
-        // Create a composite stream with system audio if requested
-        let compositeStream: MediaStream;
+        // Create a composite stream with system audio if requested and available
+        let compositeStream: MediaStream = videoStream;
         
-        if (options.captureAudio && this.audioDestination) {
+        if (options.captureAudio && currentAudioDestination) {
           try {
             // Double-check audio context is running
-            if (this.audioContext && this.audioContext.state === 'suspended') {
+            if (currentAudioContext && currentAudioContext.state === 'suspended') {
               console.log('Resuming audio context before starting recording');
-              await this.audioContext.resume();
+              await currentAudioContext.resume();
             }
             
             // Use the audio destination stream (system audio)
-            const audioStream = this.audioDestination.stream;
-            
-            // Combine video and audio tracks
-            const videoTracks = videoStream.getVideoTracks();
+            const audioStream = currentAudioDestination.stream;
             const audioTracks = audioStream.getAudioTracks();
             
             if (audioTracks.length > 0) {
+              // Combine video and audio tracks
+              const videoTracks = videoStream.getVideoTracks();
               compositeStream = new MediaStream([
                 ...videoTracks,
                 ...audioTracks
               ]);
               console.log(`Created composite stream with ${videoTracks.length} video tracks and ${audioTracks.length} audio tracks`);
             } else {
-              console.warn('No audio tracks available, recording without audio');
-              compositeStream = videoStream;
+              console.warn('No audio tracks available in destination node, recording without audio');
+              // Fallback to video only
+              compositeStream = videoStream; 
             }
           } catch (err) {
             console.warn('Failed to add system audio:', err);
+            // Fallback to video only
             compositeStream = videoStream;
           }
-        } else {
-          compositeStream = videoStream;
+        } else if (options.captureAudio) {
+            console.warn('Audio capture requested but no audio destination is available. Recording video only.');
+            compositeStream = videoStream;
         }
         
         this.stream = compositeStream;
@@ -196,10 +206,10 @@ class GameRecorder {
         // Handle data available event
         this.mediaRecorder.ondataavailable = (event) => {
           if (event.data && event.data.size > 0) {
-            console.log(`Received chunk of size: ${event.data.size} bytes`);
+            //console.log(`Received chunk of size: ${event.data.size} bytes`);
             this.recordedChunks.push(event.data);
           } else {
-            console.warn('Received empty data chunk');
+            //console.warn('Received empty data chunk');
           }
         };
 
@@ -214,7 +224,7 @@ class GameRecorder {
         this.isRecording = true;
         this.recordingStartTime = Date.now();
 
-        console.log('Recording started successfully');
+        console.log('GameRecorder: Recording started successfully');
 
         // Set up automatic stop after max duration
         setTimeout(() => {
@@ -226,7 +236,7 @@ class GameRecorder {
 
         resolve();
       } catch (error) {
-        console.error('Failed to start recording:', error);
+        console.error('Failed to start recording in GameRecorder:', error);
         reject(error);
       }
     });

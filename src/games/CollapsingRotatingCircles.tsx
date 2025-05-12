@@ -13,8 +13,23 @@ import {
   playBounceSound, 
   playGameOverSound, 
   playGameStartSound,
-  playRandomSound
+  playRandomSound,
+  getAudioContext as getSoundAudioContext,
+  initSound,
+  connectToRecorder,
+  playWallSound,
+  hasCustomSound,
+  loadCustomSound
 } from '../utils/sounds';
+import { 
+  initializeRecorder, 
+  startRecording as startGameRecording, 
+  stopRecording as stopGameRecording,
+  isRecording as checkIsRecording, 
+  downloadRecording,
+  getAudioDestination
+} from '../utils/gameRecorder';
+import { useGameRecorder } from '../utils/recorder';
 
 // Définir et exporter les styles de porte disponibles
 export enum ExitStyle {
@@ -92,6 +107,8 @@ interface CollapsingRotatingCirclesProps extends GameProps {
   showFinalScore?: boolean;
   useCustomSounds?: boolean;
   customExitSound?: File;
+  customWallSound?: File;
+  enableWallSound?: boolean;
   maxBallCount?: number;
   // Nouvelles propriétés pour les images personnalisées
   useCustomImages?: boolean;
@@ -119,6 +136,74 @@ interface CollapsingRotatingCirclesState {
   lastBallToTouchCircle?: EnhancedBall | null;
 }
 
+// Ajouter les styles pour les contrôles d'enregistrement
+const recordingStyles = {
+  container: {
+    position: 'absolute' as const,
+    top: '10px',
+    right: '10px',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: '8px 12px',
+    borderRadius: '24px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    color: 'white',
+    zIndex: 1000,
+  },
+  recordIcon: {
+    width: '12px',
+    height: '12px',
+    backgroundColor: '#ff4b4b',
+    borderRadius: '50%',
+    animation: 'pulse 1.5s infinite',
+  },
+  time: {
+    fontSize: '14px',
+    fontWeight: 'bold' as const,
+  },
+};
+
+const recordingControlsStyles = {
+  container: {
+    position: 'absolute' as const,
+    bottom: '20px',
+    right: '20px',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '10px',
+    zIndex: 1000,
+  },
+  button: {
+    width: '50px',
+    height: '50px',
+    borderRadius: '50%',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '20px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 2px 10px rgba(0, 0, 0, 0.3)',
+  },
+  recordButton: {
+    backgroundColor: '#f44336',
+    color: 'white',
+  },
+  downloadButton: {
+    backgroundColor: '#4CAF50',
+    color: 'white',
+  },
+};
+
+// Format recording time from milliseconds to MM:SS format
+const formatRecordingTime = (milliseconds: number): string => {
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+};
+
 const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({ 
   isPlaying, 
   onGameEnd,
@@ -145,6 +230,8 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   showFinalScore = true,
   useCustomSounds = false,
   customExitSound,
+  customWallSound,
+  enableWallSound = true,
   maxBallCount = 20,
   // Ajouter les nouvelles propriétés avec des valeurs par défaut
   useCustomImages = false,
@@ -203,6 +290,18 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       });
     }
   }, [useCustomImages, customImages]);
+
+  // Load custom sounds
+  useEffect(() => {
+    if (useCustomSounds) {
+      if (customWallSound) {
+        loadCustomSound(customWallSound, 'wall').catch(err => {
+          console.error("Error loading custom wall sound:", err);
+        });
+      }
+      // ... potentially load other custom sounds if needed ...
+    }
+  }, [useCustomSounds, customWallSound]);
 
   // Fonction pour créer des particules lors de la destruction d'un cercle
   const createDestructionParticles = (centerX: number, centerY: number, circleRadius: number, circleColor: string) => {
@@ -635,18 +734,28 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         // Mettre à jour la position
         let newPosition = updatePosition(ball.position, newVelocity);
 
+        // --- WALL COLLISION SOUND LOGIC --- 
+        let didCollideWithWall = false;
+
         // Vérifier les collisions avec les bords du canvas
         if (newPosition.x - newRadius < 0 || newPosition.x + newRadius > canvas.width) {
           newVelocity.x *= -bounciness;
           newPosition.x = Math.max(newRadius, Math.min(canvas.width - newRadius, newPosition.x));
-          playBounceSound(0.3);
+          didCollideWithWall = true;
         }
         
         if (newPosition.y - newRadius < 0 || newPosition.y + newRadius > canvas.height) {
           newVelocity.y *= -bounciness;
           newPosition.y = Math.max(newRadius, Math.min(canvas.height - newRadius, newPosition.y));
-          playBounceSound(0.3);
+          didCollideWithWall = true;
         }
+
+        // Play wall sound if collision occurred and enabled
+        if (didCollideWithWall && enableWallSound) {
+           const hasCustom = useCustomSounds && hasCustomSound('wall');
+           playWallSound(0.3, hasCustom); // Use the new function from sounds.ts
+        }
+        // --- END WALL COLLISION SOUND LOGIC ---
 
         return {
           ...ball,
@@ -707,10 +816,43 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                 
                 // Jouer le son de sortie (personnalisé ou standard)
                 if (useCustomSounds && customExitSound) {
-                  // Jouer le son personnalisé quand une balle passe une porte
-                  const audioElement = new Audio(URL.createObjectURL(customExitSound));
-                  audioElement.volume = 0.5; // Volume modéré
-                  audioElement.play().catch(e => console.error("Erreur lors de la lecture du son personnalisé:", e));
+                  // --- MODIFIED CUSTOM SOUND PLAYBACK ---
+                  const soundAudioCtx = getSoundAudioContext();
+                  if (soundAudioCtx) {
+                    const audioElement = new Audio(URL.createObjectURL(customExitSound));
+                    audioElement.volume = 0.5; // Volume modéré
+
+                    const sourceNode = soundAudioCtx.createMediaElementSource(audioElement);
+                    
+                    // Connect to main output (e.g., masterGainNode or directly to destination)
+                    // Assuming masterGainNode is accessible or handled in sounds.ts connect logic if not directly here
+                    // For simplicity, connecting to destination here, but ideally through a master gain
+                    sourceNode.connect(soundAudioCtx.destination);
+
+                    // Also connect to recorder destination if available
+                    const recorderDest = getAudioDestination(); // Assuming getAudioDestination is available from useGameRecorder
+                    if (recorderDest && recorderDest.context === soundAudioCtx) {
+                      console.log('[CRC Custom Sound] Connecting custom exit sound to recorder destination.');
+                      sourceNode.connect(recorderDest);
+                    } else if (recorderDest) {
+                      console.warn('[CRC Custom Sound] Custom exit sound AudioContext does not match recorder AudioContext. Sound may not be recorded.');
+                    } else {
+                      console.warn('[CRC Custom Sound] Recorder destination not available for custom exit sound.');
+                    }
+
+                    audioElement.play().catch(e => console.error("Erreur lors de la lecture du son personnalisé:", e));
+                    audioElement.onended = () => {
+                      sourceNode.disconnect(); // Clean up connections when done
+                      URL.revokeObjectURL(audioElement.src); // Revoke object URL
+                    };
+                  } else {
+                    console.error("Contexte audio non disponible pour le son de sortie personnalisé.");
+                    // Fallback to simple play if context fails, though it won't be recorded
+                    const audioElement = new Audio(URL.createObjectURL(customExitSound));
+                    audioElement.volume = 0.5;
+                    audioElement.play().catch(e => console.error("Erreur lors de la lecture du son personnalisé (fallback):", e));
+                  }
+                  // --- END MODIFIED CUSTOM SOUND PLAYBACK ---
                 } else {
                   // Jouer le son standard
                   playRandomSound();
@@ -1058,7 +1200,8 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         particles: currentParticles,
         score: currentScore,
         gameOver: isGameOver,
-        totalShrinkFactor: totalShrinkFactor
+        totalShrinkFactor: totalShrinkFactor,
+        lastBallToTouchCircle: gameState.lastBallToTouchCircle // Persist last touched ball
       });
 
       // Continuer l'animation si le jeu n'est pas terminé
@@ -1075,7 +1218,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         requestRef.current = undefined;
       }
     };
-  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate, remainingCirclesPrefix, remainingCirclesBgColor, remainingCirclesTextColor]);
+  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound, customWallSound, enableWallSound, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate, remainingCirclesPrefix, remainingCirclesBgColor, remainingCirclesTextColor]);
 
   // Fonction pour créer de nouvelles balles à l'emplacement d'un cercle détruit
   const createBallsOnDestroy = (centerX: number, centerY: number, circleRadius: number, sourceBall?: EnhancedBall): EnhancedBall[] => {
@@ -1134,202 +1277,169 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
     return newBalls;
   };
 
-  // Now modify the canvas drawing code to center the score text
-  // Update where the score is drawn in the animate function (around line 583 in the file)
-  // Replace:
-  // ctx.font = 'bold 20px Arial';
-  // ctx.fillStyle = 'white';
-  // ctx.textAlign = 'center';
-  // ctx.fillText(`Score: ${currentScore}`, centerX, 30);
-  // With nothing (remove it completely)
+  // Ajout d'un état pour gérer l'affichage des contrôles d'enregistrement
+  const [showRecordingControls, setShowRecordingControls] = useState(true);
+  
+  // Utiliser le hook useGameRecorder pour l'enregistrement
+  const { 
+    isRecording: isRecordingActive, 
+    recordingTime, 
+    videoBlob, 
+    startRecording: startVideoRecording, 
+    stopRecording: stopVideoRecording, 
+    downloadGameplayVideo,
+    getAudioDestination,
+    setupAudioRecording
+  } = useGameRecorder();
 
-  // Also add the following state for recording functionality near the beginning of the component
-  const [isRecordingState, setIsRecordingState] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<BlobPart[]>([]);
+  // Fonction pour basculer l'enregistrement
+  const toggleRecording = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-  // Add a useEffect to handle the props.isRecording value if it's passed from the parent
-  useEffect(() => {
-    if (isRecording !== undefined) {
-      if (isRecording && !isRecordingState) {
-        startRecording();
-      } else if (!isRecording && isRecordingState) {
-        stopRecording();
+    // Get sound context from sounds.ts, initialize if needed
+    let soundCtx = getSoundAudioContext(); 
+    if (!soundCtx) {
+      console.log('[CRC Recording] Sound context not found from sounds.ts, initializing sound system...');
+      initSound(); // Initialize sounds.ts context
+      soundCtx = getSoundAudioContext();
+      if (soundCtx) {
+        console.log('[CRC Recording] Sound system initialized, context state:', soundCtx.state);
+      } else {
+        console.error('[CRC Recording] Failed to initialize sound system context.');
       }
     }
-  }, [isRecording, isRecordingState]);
 
-  // Add an audio context reference for recording
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
-
-  // Add recording functions
-  const startRecording = () => {
-    if (!canvasRef.current) return;
-    
-    recordedChunksRef.current = [];
-    
-    // Créer le flux vidéo à partir du canvas
-    const videoStream = canvasRef.current.captureStream(30); // 30 FPS
-    
-    // Initialiser l'AudioContext pour la capture audio si ce n'est pas déjà fait
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-    
-    // Créer un nœud destination pour le flux audio
-    if (audioContextRef.current && !audioDestinationRef.current) {
-      audioDestinationRef.current = audioContextRef.current.createMediaStreamDestination();
-      
-      // Créer un oscillateur temporaire juste pour garantir qu'il y a un flux audio
-      // Cela peut être remplacé par une connexion plus sophistiquée selon votre système audio
-      const oscillator = audioContextRef.current.createOscillator();
-      oscillator.frequency.value = 0; // Fréquence 0 pour ne pas entendre l'oscillateur
-      oscillator.connect(audioDestinationRef.current);
-      oscillator.start();
-      
-      // Note: Pour une intégration réelle avec le système audio du jeu, 
-      // vous devriez connecter vos sources audio au audioDestinationRef.current
-    }
-    
-    // Combiner flux audio et vidéo si disponible
-    let streamToRecord = videoStream;
-    if (audioDestinationRef.current) {
-      const audioStream = audioDestinationRef.current.stream;
-      const audioTracks = audioStream.getAudioTracks();
-      
-      // Ajouter les pistes audio au flux vidéo
-      audioTracks.forEach(track => {
-        videoStream.addTrack(track);
-      });
-      
-      streamToRecord = videoStream;
-    }
-    
-    // Créer le MediaRecorder avec le flux combiné
-    try {
-      const mediaRecorder = new MediaRecorder(streamToRecord, {
-        mimeType: 'video/webm; codecs=vp9,opus'
-      });
-      
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          recordedChunksRef.current.push(e.data);
-        }
-      };
-      
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedChunksRef.current, {
-          type: 'video/webm'
-        });
-        
-        // Create download link
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        document.body.appendChild(a);
-        a.style.display = 'none';
-        a.href = url;
-        a.download = 'cercles-game-with-audio.webm';
-        a.click();
-        
-        // Clean up
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      };
-      
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start();
-      setIsRecordingState(true);
-      
-      console.log("Enregistrement démarré avec audio!");
-    } catch (error) {
-      console.error("Erreur lors de la création du MediaRecorder:", error);
-      
-      // Fallback à l'enregistrement vidéo uniquement en cas d'erreur
-      try {
-        const mediaRecorder = new MediaRecorder(videoStream, {
-          mimeType: 'video/webm;codecs=vp9'
-        });
-        
-        mediaRecorder.ondataavailable = (e) => {
-          if (e.data.size > 0) {
-            recordedChunksRef.current.push(e.data);
-          }
-        };
-        
-        mediaRecorder.onstop = () => {
-          const blob = new Blob(recordedChunksRef.current, {
-            type: 'video/webm'
-          });
-          
-          // Create download link
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          document.body.appendChild(a);
-          a.style.display = 'none';
-          a.href = url;
-          a.download = 'cercles-game-video-only.webm';
-          a.click();
-          
-          // Clean up
-          window.URL.revokeObjectURL(url);
-          document.body.removeChild(a);
-        };
-        
-        mediaRecorderRef.current = mediaRecorder;
-        mediaRecorder.start();
-        setIsRecordingState(true);
-        
-        console.log("Fallback: Enregistrement démarré (vidéo uniquement)");
-      } catch (fallbackError) {
-        console.error("Erreur avec le fallback:", fallbackError);
+    // Define the next step: setup recorder audio and toggle recording state
+    const proceedWithToggle = (finalSoundCtx: AudioContext | null) => {
+      if (finalSoundCtx) {
+        console.log('[CRC Recording] Passing sound system context to recorder setup. State:', finalSoundCtx.state);
+        // Explicitly set up the recorder's audio using the sound system's context.
+        // This initializes the recorder's destination node.
+        setupAudioRecording(finalSoundCtx); 
+      } else {
+        console.warn('[CRC Recording] Sound context is null. Recorder will attempt to set up its own audio context.');
+        // Let recorder setup its own context if sound system's context is unavailable
+        setupAudioRecording(); 
       }
+      // Now that the recorder's audio destination is guaranteed to be initialized (using the correct context if possible),
+      // call the handler which will connect sounds.ts to it and start the MediaRecorder.
+      handleRecordingToggle(); 
+    };
+
+    // Check if context needs resuming
+    if (soundCtx && soundCtx.state === 'suspended') {
+      console.log('[CRC Recording] Sound system audio context is suspended, attempting to resume...');
+      soundCtx.resume().then(() => {
+        console.log('[CRC Recording] Sound system audio context resumed successfully.');
+        proceedWithToggle(soundCtx); // Proceed with the resumed context
+      }).catch(err => {
+        console.error('[CRC Recording] Failed to resume sound system audio context:', err);
+        proceedWithToggle(null); // Proceed, but recorder will try to initialize its own audio
+      });
+    } else {
+      // Context is active, was never suspended, or is null (initialization failed)
+      if (soundCtx) {
+        console.log('[CRC Recording] Sound system audio context is active or was not suspended. State:', soundCtx.state);
+      } else {
+        console.log('[CRC Recording] Sound system audio context is null (initialization failed). Proceeding anyway.');
+      }
+      proceedWithToggle(soundCtx); // Proceed with current context (or null)
     }
   };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecordingState) {
-      mediaRecorderRef.current.stop();
-      setIsRecordingState(false);
+  // Handler function for the actual recording start/stop logic
+  const handleRecordingToggle = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    if (isRecordingActive) {
+      console.log("Arrêt de l'enregistrement...");
+      stopVideoRecording()
+        .then(blob => {
+          if (blob) {
+            console.log(`Enregistrement terminé, taille: ${blob.size} bytes`);
+          } else {
+            console.error("Stop recording returned no blob.");
+          }
+        })
+        .catch(error => {
+          console.error("Erreur lors de l'arrêt de l'enregistrement:", error);
+        });
+    } else {
+      console.log("Démarrage de l'enregistrement avec capture audio...");
       
-      // Arrêter et nettoyer l'oscillateur si nécessaire
-      if (audioContextRef.current) {
-        audioContextRef.current.close().catch(e => console.error("Erreur lors de la fermeture du contexte audio:", e));
-        audioContextRef.current = null;
-        audioDestinationRef.current = null;
+      // Get the recorder destination node
+      const destination = getAudioDestination(); 
+      if (destination) {
+        // Connect the sound system to the recorder destination right before starting
+        console.log("Connexion du système audio à l'enregistreur...");
+        connectToRecorder(destination);
+      } else {
+        console.error("Destination audio non disponible pour l'enregistrement. L'audio ne sera pas enregistré.");
       }
       
-      console.log("Enregistrement arrêté");
+      // Start recording using the hook's function with increased quality
+      startVideoRecording(canvas, 60000, { 
+        frameRate: 30,
+        videoBitsPerSecond: 8000000, // INCREASED QUALITY: 8 Mbps
+        captureAudio: true 
+      }).catch(error => {
+        console.error("Échec du démarrage de l'enregistrement:", error);
+        alert("Impossible de démarrer l'enregistrement. Vérifiez les autorisations du navigateur ou réessayez.");
+      });
+    }
+  };
+  
+  // Fonction pour télécharger la vidéo
+  const handleDownloadVideo = () => {
+    if (videoBlob) {
+      const filename = `cercles-game-${new Date().getTime()}.webm`;
+      downloadGameplayVideo(filename);
     }
   };
 
   return (
-    <div className="tiktok-game-wrapper">
+    <div className="tiktok-game-wrapper" style={{ position: 'relative' }}>
       <canvas
         ref={canvasRef}
         width={450}
         height={800}
         style={{ backgroundColor: '#111' }}
       />
-      {/* Message for recording status */}
-      {isRecordingState && (
-        <div 
-          style={{ 
-            position: 'absolute', 
-            top: '10px', 
-            right: '10px', 
-            backgroundColor: 'rgba(255, 0, 0, 0.7)', 
-            color: 'white', 
-            padding: '5px 10px', 
-            borderRadius: '20px',
-            fontSize: '14px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px'
-          }}
-        >
-          <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: 'red', animation: 'pulse 1s infinite' }}></div>
-          REC
+      {/* Afficher l'indicateur d'enregistrement */}
+      {isRecordingActive && (
+        <div style={recordingStyles.container}>
+          <div style={recordingStyles.recordIcon}></div>
+          <div style={recordingStyles.time}>{formatRecordingTime(recordingTime)}</div>
+        </div>
+      )}
+      {/* Ajouter les contrôles d'enregistrement */}
+      {showRecordingControls && (
+        <div style={recordingControlsStyles.container}>
+          <button 
+            onClick={toggleRecording} 
+            style={{
+              ...recordingControlsStyles.button, 
+              ...recordingControlsStyles.recordButton
+            }}
+            title={isRecordingActive ? "Arrêter l'enregistrement" : "Commencer l'enregistrement"}
+          >
+            {isRecordingActive ? '◼' : '⚫'}
+          </button>
+          <button 
+            onClick={handleDownloadVideo} 
+            style={{
+              ...recordingControlsStyles.button, 
+              ...recordingControlsStyles.downloadButton,
+              opacity: videoBlob ? 1 : 0.5,
+              cursor: videoBlob ? 'pointer' : 'not-allowed'
+            }}
+            title="Télécharger la vidéo"
+            disabled={!videoBlob}
+          >
+            ⬇️
+          </button>
         </div>
       )}
     </div>

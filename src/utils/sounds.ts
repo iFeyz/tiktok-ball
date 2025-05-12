@@ -66,8 +66,8 @@ let customSounds: { bounce: AudioBuffer | null, grow: AudioBuffer | null, gameOv
 
 // Point d'envoi pour l'enregistrement audio
 let masterGainNode: GainNode | null = null;
-let recorderDestination: MediaStreamAudioDestinationNode | null = null;
-let connectedNodes: Set<AudioNode> = new Set(); // Track connected nodes to avoid duplicates
+let recorderDestinationNodeForSounds: MediaStreamAudioDestinationNode | null = null;
+let isToneConnectedToRecorder = false;
 
 // Nouvelles variables pour l'activation des sons standards
 let standardSoundsEnabled = true;
@@ -157,61 +157,81 @@ export const setAudioContext = (context: AudioContext): void => {
 // Configure the audio system to connect with the recorder
 export const connectToRecorder = (destination: MediaStreamAudioDestinationNode): void => {
   if (!audioContext) {
-    console.error('Cannot connect to recorder: audio context not initialized');
-    return;
+    console.error('SOUNDS: Cannot connect to recorder - audio context not initialized');
+    initSound(); // Try to initialize if not already
+    if(!audioContext) {
+      console.error('SOUNDS: Audio context still not available after init. Aborting connectToRecorder.');
+      return;
+    }
+    console.log('SOUNDS: Audio context initialized during connectToRecorder');
   }
   
   // Ensure the destination belongs to the same audio context
   if (destination.context !== audioContext) {
-    console.error('Cannot connect to recorder: destination belongs to a different audio context');
+    console.error(
+      `SOUNDS: Cannot connect to recorder - destination context (${destination.context.state}) ` +
+      `does not match sounds.ts audio context (${audioContext.state}). Base sample rates: ` +
+      `${destination.context.sampleRate} vs ${audioContext.sampleRate}`
+    );
     return;
   }
   
-  // Store the destination
-  recorderDestination = destination;
-  
-  // Connect master gain node to recorder if available
-  if (masterGainNode && recorderDestination) {
-    try {
-      // Check if already connected to avoid duplicate connections
-      if (!connectedNodes.has(masterGainNode)) {
-        masterGainNode.connect(recorderDestination);
-        connectedNodes.add(masterGainNode);
-        console.log('Master gain node connected to recorder destination');
-      } else {
-        console.log('Master gain node already connected to recorder');
-      }
-    } catch (err) {
-      console.error('Failed to connect to recorder:', err);
-    }
-  }
-  
-  // Also connect progressive sound nodes if they exist
-  if (progressiveGainNode && recorderDestination) {
-    try {
-      if (!connectedNodes.has(progressiveGainNode)) {
-        progressiveGainNode.connect(recorderDestination);
-        connectedNodes.add(progressiveGainNode);
-        console.log('Progressive gain node connected to recorder destination');
-      }
-    } catch (err) {
-      console.error('Failed to connect progressive sound to recorder:', err);
-    }
-  }
-  
-  console.log('Audio fully connected to recorder destination');
-};
+  // Store the destination for future use if needed, but primarily connect Tone.js now
+  recorderDestinationNodeForSounds = destination;
+  console.log('SOUNDS: Recorder destination node stored.');
 
-// Helper function to ensure audio nodes are connected to recorder
-const connectNodeToRecorder = (node: AudioNode): void => {
-  if (recorderDestination && !connectedNodes.has(node)) {
-    try {
-      node.connect(recorderDestination);
-      connectedNodes.add(node);
-    } catch (err) {
-      console.error('Failed to connect node to recorder:', err);
+  // Connect Tone.js destination
+  try {
+    const toneContext = Tone.getContext();
+    if (toneContext.rawContext !== audioContext) {
+      console.warn(
+        `SOUNDS: Tone.js context (${(toneContext.rawContext as AudioContext).state}, ` +
+        `sampleRate: ${(toneContext.rawContext as AudioContext).sampleRate}) ` +
+        `differs from main audio context (${audioContext.state}, sampleRate: ${audioContext.sampleRate}). ` +
+        `This might cause issues.`
+      );
+      // Attempt to connect anyway if contexts are different but running
     }
+
+    if (isToneConnectedToRecorder && recorderDestinationNodeForSounds) {
+        console.log('SOUNDS: Tone.js already connected to a recorder destination. Disconnecting first.');
+        try {
+            // Attempt to disconnect from the stored destination node
+            Tone.getDestination().disconnect(recorderDestinationNodeForSounds);
+            console.log('SOUNDS: Disconnected Tone.js from previous recorder destination.');
+        } catch (e) { 
+            console.warn('SOUNDS: Error disconnecting Tone.js, maybe already disconnected or node changed:', e);
+        } 
+        isToneConnectedToRecorder = false;
+    }
+
+    if (recorderDestinationNodeForSounds) { // Ensure destination still exists
+      console.log('SOUNDS: Attempting to connect Tone.Destination to recorder destination node.');
+      Tone.getDestination().connect(recorderDestinationNodeForSounds);
+      isToneConnectedToRecorder = true;
+      console.log('SOUNDS: Tone.js output (Tone.Destination) successfully connected to recorder destination node.');
+    } else {
+      console.error('SOUNDS: Recorder destination node became unavailable before connecting Tone.js.');
+    }
+
+  } catch (err) {
+    console.error('SOUNDS: Failed to connect Tone.js to recorder destination node:', err);
+    isToneConnectedToRecorder = false; // Ensure flag is false on error
   }
+
+  // Connect progressive sound gain node directly if it exists
+  if (progressiveGainNode && recorderDestinationNodeForSounds) {
+      try {
+          // Disconnect first
+          try { progressiveGainNode.disconnect(recorderDestinationNodeForSounds); } catch(e) {}
+          progressiveGainNode.connect(recorderDestinationNodeForSounds);
+          console.log('SOUNDS: Progressive gain node connected to recorder destination.');
+      } catch (err) {
+          console.error('SOUNDS: Failed to connect progressive sound gain node to recorder destination:', err);
+      }
+  }
+
+  console.log('SOUNDS: Audio connection process to recorder destination finished.');
 };
 
 // Sound for ball bounce
@@ -266,8 +286,8 @@ export const playBounceSound = (
     }
     
     // Also connect directly to recorder destination for reliable recording
-    if (recorderDestination) {
-      gainNode.connect(recorderDestination);
+    if (recorderDestinationNodeForSounds) {
+      gainNode.connect(recorderDestinationNodeForSounds);
     }
     
     source.start();
@@ -316,8 +336,8 @@ export const playGrowSound = (volume: number = 0.5, useCustom: boolean = false):
     gainNode.connect(audioContext.destination);
     
     // Also connect to recorder destination if available
-    if (recorderDestination) {
-      gainNode.connect(recorderDestination);
+    if (recorderDestinationNodeForSounds) {
+      gainNode.connect(recorderDestinationNodeForSounds);
       console.log('[DEBUG GROW SOUND] Connected to recorder destination');
     }
     
@@ -347,11 +367,17 @@ export const playGameOverSound = (useCustom: boolean = false): void => {
     gainNode.gain.value = 0.7; // Volume fixe pour le game over
     
     source.connect(gainNode);
-    gainNode.connect(audioContext.destination);
+    // Connect to main output (speakers)
+    if (masterGainNode) {
+        gainNode.connect(masterGainNode);
+    } else {
+        gainNode.connect(audioContext.destination);
+        console.warn('playGameOverSound: Master gain node not found, connecting directly to audio context destination.');
+    }
     
     // Also connect to recorder destination if available
-    if (recorderDestination) {
-      gainNode.connect(recorderDestination);
+    if (recorderDestinationNodeForSounds) {
+      gainNode.connect(recorderDestinationNodeForSounds);
     }
     
     source.start();
@@ -687,7 +713,12 @@ export const loadCustomSound = async (file: File, soundType: CustomSoundType): P
       console.log(`[DEBUG SOUND LOADING] Audio successfully decoded for ${soundType} sound`);
       
       // Store the custom sound
-      customSounds[soundType] = audioBuffer;
+      // Explicitly check the type to assign correctly
+      if (soundType === 'bounce' || soundType === 'grow' || soundType === 'gameOver' || soundType === 'wall') {
+        customSounds[soundType] = audioBuffer;
+      } else {
+        console.warn(`[DEBUG SOUND LOADING] Unknown soundType: ${soundType}, sound not stored.`);
+      }
       
       console.log(`[DEBUG SOUND LOADING] Custom ${soundType} sound loaded successfully. Duration: ${audioBuffer.duration.toFixed(2)}s`);
       console.log(`[DEBUG SOUND LOADING] Current customSounds state:`, 
@@ -695,12 +726,16 @@ export const loadCustomSound = async (file: File, soundType: CustomSoundType): P
     } catch (decodeError) {
       console.error(`[DEBUG SOUND LOADING] Error decoding audio data for ${soundType}:`, decodeError);
       // Even if decoding fails, make sure we don't block future sound playback
-      customSounds[soundType] = null;
+      if (soundType === 'bounce' || soundType === 'grow' || soundType === 'gameOver' || soundType === 'wall') {
+         customSounds[soundType] = null;
+      }
     }
   } catch (e) {
     console.error(`[DEBUG SOUND LOADING] Error loading custom ${soundType} sound:`, e);
     // Make sure we don't leave this sound in an undefined state
-    customSounds[soundType] = null;
+    if (soundType === 'bounce' || soundType === 'grow' || soundType === 'gameOver' || soundType === 'wall') {
+         customSounds[soundType] = null;
+    }
   }
 };
 
@@ -856,12 +891,12 @@ export const playBackgroundMusic = (): void => {
     isBackgroundMusicPlaying = true;
     
     // If audio context and recorder destination exist, connect HTML Audio to recorder
-    if (audioContext && recorderDestination) {
+    if (audioContext && recorderDestinationNodeForSounds) {
       try {
         // Create media element source if needed
         const source = audioContext.createMediaElementSource(backgroundMusic);
         source.connect(audioContext.destination);
-        source.connect(recorderDestination);
+        source.connect(recorderDestinationNodeForSounds);
         console.log('[BACKGROUND] Connected HTML Audio background music to recorder');
       } catch (e) {
         // This might throw if the source is already connected
@@ -1669,8 +1704,8 @@ export const playMIDINote = (volume: number = 0.7): void => {
     }
     
     // Always connect directly to recorder for reliable recording
-    if (recorderDestination) {
-      gainNode.connect(recorderDestination);
+    if (recorderDestinationNodeForSounds) {
+      gainNode.connect(recorderDestinationNodeForSounds);
       console.log('[MIDI] Connected MIDI sound to recorder destination');
     }
     
@@ -2059,11 +2094,12 @@ export const playWallSound = (
   volume: number = 0.3, 
   useCustom: boolean = false
 ): void => {
-  console.log(`[DEBUG playWallSound] Called with volume=${volume}, useCustom=${useCustom}`);
+  console.log(`[DEBUG playWallSound] Called with volume=${volume}, useCustom=${useCustom}, soundEnabled=${standardSoundsEnabled}`);
   
-  // Ne rien jouer si les sons standards sont désactivés (à moins qu'on utilise un son custom)
-  if (!standardSoundsEnabled && !useCustom) {
-    console.log('[DEBUG playWallSound] Skipping playback: standardSoundsEnabled=false and useCustom=false');
+  // Ne rien jouer si les sons standards sont désactivés (à moins qu'on utilise un son custom ET que le son custom existe)
+  const customWallSoundAvailable = useCustom && customSounds.wall !== null;
+  if (!standardSoundsEnabled && !customWallSoundAvailable) {
+    console.log('[DEBUG playWallSound] Skipping playback: standard sounds disabled and custom wall sound not available/requested');
     return;
   }
   
@@ -2081,19 +2117,32 @@ export const playWallSound = (
   }
   
   try {
-    // Check if custom sound is available and requested
-    const hasCustomWall = useCustom && customSounds.wall !== null;
-    console.log(`[DEBUG playWallSound] HasCustomWall: ${hasCustomWall}, customSounds.wall: ${customSounds.wall ? 'exists' : 'null'}`);
-    
-    // Use custom or bounce sound buffer
-    const soundBuffer = hasCustomWall ? customSounds.wall : soundCache['bounce'];
+    // Determine which buffer to use
+    let soundBuffer: AudioBuffer | null = null;
+    let soundSourceName: string = 'default bounce';
+
+    if (customWallSoundAvailable) {
+      soundBuffer = customSounds.wall;
+      soundSourceName = 'custom wall';
+      console.log('[DEBUG playWallSound] Using custom wall sound');
+    } else if (standardSoundsEnabled) {
+      // Fallback to default bounce sound if standard sounds are enabled
+      soundBuffer = soundCache['bounce'];
+      soundSourceName = 'default bounce';
+      console.log('[DEBUG playWallSound] Using default bounce sound as wall sound');
+    } else {
+      // This case should ideally not be reached due to the check at the beginning,
+      // but added for safety.
+      console.log('[DEBUG playWallSound] No sound to play (standard disabled, custom unavailable)');
+      return; 
+    }
     
     if (!soundBuffer) {
-      console.warn('[DEBUG playWallSound] No sound buffer available');
+      console.warn(`[DEBUG playWallSound] No sound buffer available for ${soundSourceName}`);
       return;
     }
     
-    console.log(`[DEBUG playWallSound] Creating buffer source with ${hasCustomWall ? 'custom' : 'default'} sound`);
+    console.log(`[DEBUG playWallSound] Creating buffer source with ${soundSourceName} sound`);
     const source = audioContext.createBufferSource();
     source.buffer = soundBuffer;
     
@@ -2107,19 +2156,29 @@ export const playWallSound = (
     if (masterGainNode) {
       gainNode.connect(masterGainNode);
     } else {
+      // Fallback: connect directly to destination if master gain not initialized
+      console.warn('[DEBUG playWallSound] Master gain node not found, connecting directly to audio context destination.');
       gainNode.connect(audioContext.destination);
     }
     
     // Always connect to recorder for reliable capture
-    if (recorderDestination) {
-      gainNode.connect(recorderDestination);
+    if (recorderDestinationNodeForSounds) {
+      gainNode.connect(recorderDestinationNodeForSounds);
       console.log('[DEBUG playWallSound] Connected to recorder destination');
     } else {
-      console.log('[DEBUG playWallSound] No recorder destination available');
+      console.log('[DEBUG playWallSound] No recorder destination available, sound may not be recorded.');
     }
     
     source.start();
     console.log('[DEBUG playWallSound] Sound playback started');
+
+    // Clean up the source node after it finishes playing
+    source.onended = () => {
+      try {
+        source.disconnect();
+      } catch (e) { /* Ignore errors if already disconnected */ }
+    };
+
   } catch (e) {
     console.error('[DEBUG playWallSound] Error playing wall sound:', e);
   }
@@ -2185,8 +2244,8 @@ export const playBackgroundOscillator = (volume: number = 0.4): void => {
     }
     
     // Always connect to recorder destination if available
-    if (recorderDestination) {
-      gainNode.connect(recorderDestination);
+    if (recorderDestinationNodeForSounds) {
+      gainNode.connect(recorderDestinationNodeForSounds);
       console.log('[BACKGROUND] Connected background music to recorder destination');
     }
     
