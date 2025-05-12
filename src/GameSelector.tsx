@@ -3,6 +3,8 @@ import { GameType } from './types';
 import GrowingBall from './games/GrowingBall';
 import RotatingCircle from './games/RotatingCircle';
 import TrailBall from './games/TrailBall';
+import CollapsingCircles from './games/CollapsingCircles';
+import CollapsingRotatingCircles from './games/CollapsingRotatingCircles';
 import { 
   playGameStartSound, 
   playGameOverSound, 
@@ -185,6 +187,19 @@ const GameSelector: React.FC = () => {
   const [midiInstrumentPreset, setMidiInstrumentPreset] = useState<MIDIInstrumentPresetKey>(MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING);
   const midiFileRef = useRef<HTMLInputElement>(null);
   
+  // Ajout des états pour les paramètres spécifiques à CollapsingRotatingCircles
+  const [initialCircleCount, setInitialCircleCount] = useState(5);
+  const [circleGap, setCircleGap] = useState(40);
+  const [exitSize, setExitSize] = useState(30); // Angle en degrés
+  const [rotationSpeed, setRotationSpeed] = useState(0.01); // Vitesse de rotation en radians par frame
+  const [maxBallSpeed, setMaxBallSpeed] = useState(8); // Vitesse maximale pour éviter que la balle ne s'échappe
+  const [shrinkCirclesOnDestroy, setShrinkCirclesOnDestroy] = useState(true); // Activé par défaut
+  const [shrinkFactor, setShrinkFactor] = useState(0.8); // Facteur de rétrécissement des cercles (80% de la taille originale)
+  
+  // Ajout des états manquants pour la fonction de rendu
+  const [showSettings, setShowSettings] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  
   // Initialisation des références pour les éléments d'upload
   useEffect(() => {
     soundTypes.forEach(type => {
@@ -203,6 +218,13 @@ const GameSelector: React.FC = () => {
     
     setSelectedGame(gameType);
     setIsPlaying(false);
+    
+    // Set the appropriate physics preset based on game type
+    if (gameType === GameType.COLLAPSING_CIRCLES) {
+      // You might want to apply a specific preset for CollapsingCircles if needed
+      // For now, we'll use the default or let the user choose.
+      setActivePreset("satisfying"); // Or any other default you prefer
+    }
   };
   
   const handleStartGame = () => {
@@ -278,6 +300,26 @@ const GameSelector: React.FC = () => {
   const handleBallSpeedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setBallSpeed(parseFloat(e.target.value));
     setActivePreset("custom");
+  };
+  
+  const handleInitialCircleCountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const count = parseInt(e.target.value);
+    setInitialCircleCount(count);
+  };
+
+  const handleCircleGapChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const gap = parseInt(e.target.value);
+    setCircleGap(gap);
+  };
+
+  const handleExitSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const size = parseInt(e.target.value);
+    setExitSize(size);
+  };
+
+  const handleRotationSpeedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const speed = parseFloat(e.target.value);
+    setRotationSpeed(speed);
   };
   
   const handleBallCountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -798,6 +840,25 @@ const GameSelector: React.FC = () => {
           <RotatingCircle
             isPlaying={isPlaying}
             onGameEnd={handleGameEnd}
+          />
+        );
+
+      case GameType.COLLAPSING_ROTATING_CIRCLES:
+        return (
+          <CollapsingRotatingCircles
+            isPlaying={isPlaying}
+            onGameEnd={handleGameEnd}
+            gravity={gravity}
+            bounciness={bounciness}
+            ballSpeed={ballSpeed}
+            initialCircleCount={initialCircleCount}
+            circleGap={circleGap}
+            exitSize={exitSize}
+            rotationSpeed={rotationSpeed}
+            ballCount={ballCount}
+            maxBallSpeed={maxBallSpeed}
+            shrinkCirclesOnDestroy={shrinkCirclesOnDestroy}
+            shrinkFactor={shrinkFactor}
           />
         );
 
@@ -1497,7 +1558,7 @@ const GameSelector: React.FC = () => {
   
   // Render physics settings for Growing Ball game
   const renderPhysicsSettings = () => {
-    if (selectedGame !== GameType.GROWING_BALL || isPlaying) {
+    if ((selectedGame !== GameType.GROWING_BALL && selectedGame !== GameType.COLLAPSING_ROTATING_CIRCLES) || isPlaying) {
       return null;
     }
     
@@ -2035,6 +2096,179 @@ const GameSelector: React.FC = () => {
     );
   };
   
+  // Fonction pour afficher les paramètres spécifiques à CollapsingRotatingCircles
+  const renderCollapsingRotatingCirclesSettings = () => {
+    if (selectedGame !== GameType.COLLAPSING_ROTATING_CIRCLES || isPlaying) {
+      return null;
+    }
+    
+    return (
+      <div className="rotating-circles-settings">
+        <h4>Paramètres des Cercles Rotatifs</h4>
+        
+        <div className="control">
+          <label>Nombre de cercles: {initialCircleCount}</label>
+          <input 
+            type="range" 
+            min="2" 
+            max="15" 
+            step="1" 
+            value={initialCircleCount}
+            onChange={handleInitialCircleCountChange}
+          />
+        </div>
+        
+        <div className="control">
+          <label>Espace entre les cercles: {circleGap}px</label>
+          <input 
+            type="range" 
+            min="20" 
+            max="80" 
+            step="5" 
+            value={circleGap}
+            onChange={handleCircleGapChange}
+          />
+        </div>
+        
+        <div className="control">
+          <label>Taille de la porte: {exitSize}°</label>
+          <input 
+            type="range" 
+            min="10" 
+            max="120" 
+            step="5" 
+            value={exitSize}
+            onChange={handleExitSizeChange}
+          />
+        </div>
+        
+        <div className="control">
+          <label>Vitesse de rotation: {rotationSpeed.toFixed(3)}</label>
+          <input 
+            type="range" 
+            min="0.001" 
+            max="0.05" 
+            step="0.001" 
+            value={rotationSpeed}
+            onChange={handleRotationSpeedChange}
+          />
+        </div>
+        
+        <div className="control">
+          <label>Vitesse maximale de la balle: {maxBallSpeed.toFixed(1)}</label>
+          <input 
+            type="range" 
+            min="5" 
+            max="15" 
+            step="0.5" 
+            value={maxBallSpeed}
+            onChange={handleMaxBallSpeedChange}
+          />
+          <div className="control-hint">
+            Limite la vitesse pour empêcher la balle de sortir accidentellement
+          </div>
+        </div>
+        
+        <div className="control toggle-control">
+          <label className="toggle-label">
+            Rétrécir les cercles:
+            <button 
+              className={`toggle-button ${shrinkCirclesOnDestroy ? 'active' : ''}`}
+              onClick={handleShrinkCirclesToggle}
+            >
+              {shrinkCirclesOnDestroy ? 'ON' : 'OFF'}
+            </button>
+          </label>
+          <div className="control-hint">
+            Rétrécit les cercles restants quand un cercle est détruit
+          </div>
+        </div>
+        
+        {shrinkCirclesOnDestroy && (
+          <div className="control">
+            <label>Taille après rétrécissement: {Math.round(shrinkFactor * 100)}%</label>
+            <input 
+              type="range" 
+              min="0.4" 
+              max="0.8" 
+              step="0.05" 
+              value={shrinkFactor}
+              onChange={handleShrinkFactorChange}
+            />
+            <div className="control-hint">
+              Pourcentage de la taille originale après destruction d'un cercle (plus petit = plus difficile)
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+  
+  const handleMaxBallSpeedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMaxBallSpeed(parseFloat(e.target.value));
+  };
+  
+  const handleShrinkCirclesToggle = () => {
+    setShrinkCirclesOnDestroy(!shrinkCirclesOnDestroy);
+  };
+  
+  const handleShrinkFactorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setShrinkFactor(parseFloat(e.target.value));
+  };
+  
+  // Fonction pour gérer le plein écran
+  const handleFullscreenToggle = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.error(`Erreur de passage en plein écran: ${err.message}`);
+      });
+      setIsFullscreen(true);
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    }
+  };
+  
+  // Fonction pour gérer le bouton play/pause
+  const handlePlayPause = () => {
+    if (isPlaying) {
+      handleStopGame();
+    } else {
+      handleStartGame();
+    }
+  };
+  
+  // Fonction pour afficher les options de jeu
+  const renderGameOptions = () => {
+    return (
+      <div className="game-options">
+        <button 
+          className={`game-option ${selectedGame === GameType.GROWING_BALL ? 'active' : ''}`}
+          onClick={() => handleGameSelect(GameType.GROWING_BALL)}
+        >
+          <div className="game-option-title">Balles Rebondissantes</div>
+          <div className="game-option-desc">Classique! Les balles rebondissent et grossissent avec le temps.</div>
+        </button>
+        <button 
+          className={`game-option ${selectedGame === GameType.ROTATING_CIRCLE ? 'active' : ''}`}
+          onClick={() => handleGameSelect(GameType.ROTATING_CIRCLE)}
+        >
+          <div className="game-option-title">Rotation</div>
+          <div className="game-option-desc">Faites sortir les balles à travers l'ouverture rotative.</div>
+        </button>
+        <button 
+          className={`game-option ${selectedGame === GameType.COLLAPSING_ROTATING_CIRCLES ? 'active' : ''}`}
+          onClick={() => handleGameSelect(GameType.COLLAPSING_ROTATING_CIRCLES)}
+        >
+          <div className="game-option-title">Cercles Rotatifs</div>
+          <div className="game-option-desc">Faites passer la balle par les portes des cercles en rotation pour les détruire.</div>
+        </button>
+      </div>
+    );
+  };
+  
   // Render function for the main component with sidebar layout
   return (
     <div className="app-container">
@@ -2053,13 +2287,22 @@ const GameSelector: React.FC = () => {
                 className="game-button"
                 onClick={() => handleGameSelect(GameType.GROWING_BALL)}
               >
-                Balles Rebondissantes
+                <div className="game-button-title">Balles Rebondissantes</div>
+                <div className="game-button-desc">Classique! Les balles rebondissent sur les murs et grossissent avec le temps.</div>
               </button>
               <button 
                 className="game-button"
                 onClick={() => handleGameSelect(GameType.ROTATING_CIRCLE)}
               >
-                Rotation
+                <div className="game-button-title">Rotation</div>
+                <div className="game-button-desc">Faites sortir les balles à travers l'ouverture rotative.</div>
+              </button>
+              <button 
+                className="game-button"
+                onClick={() => handleGameSelect(GameType.COLLAPSING_ROTATING_CIRCLES)}
+              >
+                <div className="game-button-title">Cercles Rotatifs</div>
+                <div className="game-button-desc">Faites passer la balle par les portes des cercles en rotation pour les détruire.</div>
               </button>
             </div>
           </div>
@@ -2067,7 +2310,7 @@ const GameSelector: React.FC = () => {
           <>
             {/* Game controls */}
             {renderGameControls()}
-
+          
             {/* Tabs navigation */}
             <div className="controls-tabs">
               <button 
@@ -2117,21 +2360,22 @@ const GameSelector: React.FC = () => {
             {/* Tab content panels */}
             <div className={`control-panel ${activeTab === 'physics' ? 'active' : ''}`}>
               {renderPhysicsSettings()}
+              {renderCollapsingRotatingCirclesSettings()}
             </div>
-            
+        
             <div className={`control-panel ${activeTab === 'effects' ? 'active' : ''}`}>
               <div className="effects-section">
                 <h4>Effets & Gameplay</h4>
                 <div className="toggle-options">
-            <div className="toggle-control">
-              <label className="toggle-label">
+              <div className="toggle-control">
+                <label className="toggle-label">
                       Effets de particules:
-                      <button 
+                  <button
                         className={`toggle-button ${effectsEnabled ? 'active' : ''}`}
                         onClick={handleEffectsToggle}
-                      >
+                  >
                         {effectsEnabled ? 'ON' : 'OFF'}
-                      </button>
+                  </button>
                     </label>
                   </div>
                   <div className="toggle-control">
@@ -2216,8 +2460,8 @@ const GameSelector: React.FC = () => {
                     </div>
                   ))}
                 </div>
-                  )}
-                  
+              )}
+            
                   <div className="upload-info">
                     Formats supportés: PNG, JPG, GIF<br />
                     Taille recommandée: 128×128px
@@ -2234,8 +2478,8 @@ const GameSelector: React.FC = () => {
                   </button>
                     
                     {showImageAssignment && renderBallImageAssignment()}
-                  </div>
-            )}
+                </div>
+              )}
           </div>
         </div>
         

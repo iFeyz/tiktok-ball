@@ -106,4 +106,22 @@ export const updatePosition = (
     x: position.x + velocity.x,
     y: position.y + velocity.y
   };
+};
+
+// Limit the maximum velocity of a ball to prevent excessive speed
+export const limitVelocity = (
+  velocity: Vector2D,
+  maxSpeed: number
+): Vector2D => {
+  const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+  
+  if (speed > maxSpeed) {
+    const ratio = maxSpeed / speed;
+    return {
+      x: velocity.x * ratio,
+      y: velocity.y * ratio
+    };
+  }
+  
+  return velocity;
 }; 

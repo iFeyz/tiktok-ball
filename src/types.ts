@@ -12,7 +12,9 @@ export enum GameType {
   PAINTING_BALL = 'painting-ball',
   DOMINO_SOUND = 'domino-sound',
   ROTATING_MAZE = 'rotating-maze',
-  MAGNETIC_BALL = 'magnetic-ball'
+  MAGNETIC_BALL = 'magnetic-ball',
+  COLLAPSING_CIRCLES = 'collapsing-circles',
+  COLLAPSING_ROTATING_CIRCLES = 'collapsing-rotating-circles'
 }
 
 export interface Vector2D {
