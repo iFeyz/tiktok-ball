@@ -1,10 +1,13 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { GameType } from './types';
+import { GameType, Ball, Vector2D } from './types';
 import GrowingBall from './games/GrowingBall';
 import RotatingCircle from './games/RotatingCircle';
 import TrailBall from './games/TrailBall';
 import CollapsingCircles from './games/CollapsingCircles';
-import CollapsingRotatingCircles from './games/CollapsingRotatingCircles';
+import CollapsingRotatingCircles, { 
+  ExitStyle, 
+  ParticleStyle 
+} from './games/CollapsingRotatingCircles';
 import { 
   playGameStartSound, 
   playGameOverSound, 
@@ -209,9 +212,42 @@ const GameSelector: React.FC = () => {
   // Ajout de l'état pour l'espace minimum entre les cercles
   const [minCircleGap, setMinCircleGap] = useState(15);
 
+  // Ajout de l'état pour la taille du cercle de base
+  const [baseBallRadius, setBaseBallRadius] = useState(15);
+
+  // Ajout de l'état pour la taille minimale d'un cercle
+  const [minCircleRadius, setMinCircleRadius] = useState(20);
+
+  // Ajouter les états pour les styles de porte et de particules
+  const [exitStyle, setExitStyle] = useState<ExitStyle>(ExitStyle.STANDARD);
+  const [particleStyle, setParticleStyle] = useState<ParticleStyle>(ParticleStyle.STANDARD);
+
+  // Ajouter les nouveaux états dans le composant GameSelector
+  const [customEndMessage, setCustomEndMessage] = useState("VICTOIRE !");
+  const [showFinalScore, setShowFinalScore] = useState(true);
+
+  // Fonctions pour gérer les changements de style
+  const handleExitStyleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setExitStyle(e.target.value as ExitStyle);
+  };
+
+  const handleParticleStyleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setParticleStyle(e.target.value as ParticleStyle);
+  };
+
   // Fonction pour gérer le changement de l'espace minimum entre les cercles
   const handleMinCircleGapChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setMinCircleGap(parseInt(e.target.value));
+  };
+
+  // Fonction pour gérer le changement de la taille du cercle de base
+  const handleBaseBallRadiusChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBaseBallRadius(parseInt(e.target.value));
+  };
+
+  // Fonction pour gérer le changement de la taille minimale d'un cercle
+  const handleMinCircleRadiusChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMinCircleRadius(parseInt(e.target.value));
   };
 
   // Initialisation des références pour les éléments d'upload
@@ -884,6 +920,12 @@ const GameSelector: React.FC = () => {
             effectsEnabled={effectsEnabled}
             progressiveRotationOffset={progressiveRotationOffset}
             ballsOnDestroy={ballsOnDestroy}
+            baseBallRadius={baseBallRadius}
+            exitStyle={exitStyle}
+            particleStyle={particleStyle}
+            minCircleRadius={minCircleRadius}
+            customEndMessage={customEndMessage}
+            showFinalScore={showFinalScore}
           />
         );
 
@@ -2152,6 +2194,36 @@ const GameSelector: React.FC = () => {
         <h4>Paramètres des Cercles Rotatifs</h4>
         
         <div className="control">
+          <label>Taille de la balle: {baseBallRadius}px</label>
+          <input 
+            type="range" 
+            min="5" 
+            max="30" 
+            step="1" 
+            value={baseBallRadius}
+            onChange={handleBaseBallRadiusChange}
+          />
+          <div className="control-hint">
+            Définit la taille de base des balles qui traversent les cercles
+          </div>
+        </div>
+        
+        <div className="control">
+          <label>Taille minimale des cercles: {minCircleRadius}px</label>
+          <input 
+            type="range" 
+            min="15" 
+            max="100" 
+            step="1" 
+            value={minCircleRadius}
+            onChange={handleMinCircleRadiusChange}
+          />
+          <div className="control-hint">
+            Limite la taille minimale qu'un cercle peut atteindre après rétrécissement
+          </div>
+        </div>
+        
+        <div className="control">
           <label>Nombre de cercles: {initialCircleCount}</label>
           <input 
             type="range" 
@@ -2245,6 +2317,42 @@ const GameSelector: React.FC = () => {
         </div>
         
         <div className="control">
+          <label>Style de la porte:</label>
+          <select 
+            value={exitStyle} 
+            onChange={handleExitStyleChange}
+            className="style-select"
+          >
+            <option value={ExitStyle.STANDARD}>Standard</option>
+            <option value={ExitStyle.INVERTED}>Couleurs inversées</option>
+            <option value={ExitStyle.GLOWING}>Brillant</option>
+            <option value={ExitStyle.TRANSPARENT}>Transparent (cercle ouvert)</option>
+            <option value={ExitStyle.COLORFUL}>Arc-en-ciel</option>
+          </select>
+          <div className="control-hint">
+            Change l'apparence visuelle de la porte de sortie des cercles
+          </div>
+        </div>
+        
+        <div className="control">
+          <label>Style des particules:</label>
+          <select 
+            value={particleStyle} 
+            onChange={handleParticleStyleChange}
+            className="style-select"
+          >
+            <option value={ParticleStyle.STANDARD}>Standard</option>
+            <option value={ParticleStyle.SPARKLE}>Étincelles</option>
+            <option value={ParticleStyle.EXPLOSION}>Explosion</option>
+            <option value={ParticleStyle.MINIMAL}>Minimal</option>
+            <option value={ParticleStyle.CONFETTI}>Confetti</option>
+          </select>
+          <div className="control-hint">
+            Définit l'effet visuel lors de la destruction d'un cercle
+          </div>
+        </div>
+        
+        <div className="control">
           <label>Vitesse maximale de la balle: {maxBallSpeed.toFixed(1)}</label>
           <input 
             type="range" 
@@ -2290,6 +2398,48 @@ const GameSelector: React.FC = () => {
             </div>
           </div>
         )}
+        
+        {/* Ajouter les nouveaux contrôles à la fin */}
+        <div className="game-end-settings" style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
+          <h5>Personnalisation de fin de jeu</h5>
+          
+          <div className="control">
+            <label>Message de fin:</label>
+            <input 
+              type="text" 
+              value={customEndMessage}
+              onChange={(e) => setCustomEndMessage(e.target.value)}
+              style={{ 
+                width: '100%', 
+                padding: '8px', 
+                borderRadius: '4px', 
+                border: '1px solid #555',
+                backgroundColor: '#333',
+                color: 'white',
+                marginTop: '5px'
+              }}
+              placeholder="Message affiché à la fin du jeu"
+            />
+            <div className="control-hint">
+              Texte qui sera affiché lorsque tous les cercles sont détruits
+            </div>
+          </div>
+          
+          <div className="control toggle-control">
+            <label className="toggle-label">
+              Afficher le score final:
+              <button 
+                className={`toggle-button ${showFinalScore ? 'active' : ''}`}
+                onClick={() => setShowFinalScore(!showFinalScore)}
+              >
+                {showFinalScore ? 'ON' : 'OFF'}
+              </button>
+            </label>
+            <div className="control-hint">
+              Détermine si le score final sera affiché sous le message de fin
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
@@ -2363,7 +2513,7 @@ const GameSelector: React.FC = () => {
   const handleBallsOnDestroyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setBallsOnDestroy(parseInt(e.target.value));
   };
-  
+
   // Render function for the main component with sidebar layout
   return (
     <div className="app-container">
