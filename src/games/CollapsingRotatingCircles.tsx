@@ -81,13 +81,6 @@ interface EnhancedBall extends Ball {
   growthRate?: number;
 }
 
-// Audio queue system for door destruction sounds
-interface DoorDestructionSound {
-  type: 'midi' | 'music';
-  volume: number;
-  customSound?: File;
-}
-
 interface CollapsingRotatingCirclesProps extends GameProps {
   gravity?: number;
   bounciness?: number;
@@ -317,74 +310,6 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       // ... potentially load other custom sounds if needed ...
     }
   }, [useCustomSounds, customWallSound]);
-
-  // Add state for audio queue
-  const [doorSoundQueue, setDoorSoundQueue] = useState<DoorDestructionSound[]>([]);
-  const [isPlayingDoorSound, setIsPlayingDoorSound] = useState(false);
-
-  // Add effect to process the door sound queue
-  useEffect(() => {
-    if (doorSoundQueue.length > 0 && !isPlayingDoorSound) {
-      setIsPlayingDoorSound(true);
-      const nextSound = doorSoundQueue[0];
-      
-      // Play the next sound
-      if (nextSound.type === 'midi') {
-        console.log("[Door Sound Queue] Playing queued MIDI note");
-        // Correction: playMidiNote doesn't return a Promise
-        playMidiNote(nextSound.volume);
-        // Use a timeout to simulate the duration of the MIDI note
-        setTimeout(() => {
-          // Remove the sound from the queue and allow next sound to play
-          setDoorSoundQueue(prev => prev.slice(1));
-          setIsPlayingDoorSound(false);
-        }, 120); // Reduced from 500ms to 250ms
-      } else if (nextSound.type === 'music') {
-        console.log("[Door Sound Queue] Playing queued music sound");
-        if (useCustomSounds && nextSound.customSound) {
-          const audioElement = new Audio(URL.createObjectURL(nextSound.customSound));
-          audioElement.volume = nextSound.volume;
-          
-          // Set up event listener to handle when audio finishes
-          audioElement.onended = () => {
-            setDoorSoundQueue(prev => prev.slice(1));
-            setIsPlayingDoorSound(false);
-          };
-          
-          // Add timeupdate listener to allow next sound to play sooner
-          audioElement.ontimeupdate = () => {
-            // If we've played at least 300ms of the sound, we can proceed to the next sound
-            if (audioElement.currentTime >= 0.3) {
-              audioElement.ontimeupdate = null;
-              setDoorSoundQueue(prev => prev.slice(1));
-              setIsPlayingDoorSound(false);
-            }
-          };
-          
-          // Handle errors
-          audioElement.onerror = () => {
-            console.error("[Door Sound Queue] Error playing custom sound");
-            setDoorSoundQueue(prev => prev.slice(1));
-            setIsPlayingDoorSound(false);
-          };
-          
-          audioElement.play().catch((e: Error) => {
-            console.error("Erreur lors de la lecture du son personnalisé:", e);
-            setDoorSoundQueue(prev => prev.slice(1));
-            setIsPlayingDoorSound(false);
-          });
-        } else {
-          // Play random sound with a timeout to simulate its duration
-          playRandomSound();
-          // Use a timeout to simulate sound duration
-          setTimeout(() => {
-            setDoorSoundQueue(prev => prev.slice(1));
-            setIsPlayingDoorSound(false);
-          }, 300); // Reduced from 700ms to 300ms
-        }
-      }
-    }
-  }, [doorSoundQueue, isPlayingDoorSound, useCustomSounds]);
 
   // Fonction pour créer des particules lors de la destruction d'un cercle
   const createDestructionParticles = (centerX: number, centerY: number, circleRadius: number, circleColor: string) => {
@@ -909,47 +834,46 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                 if (soundCtx && soundCtx.state === 'suspended') {
                   console.log('[Door Destroy] Sound context is suspended, attempting to resume...');
                   soundCtx.resume().then(() => {
-                    // Add sounds to queue instead of playing immediately
-                    // Queue MIDI note if enabled
+                    // Play MIDI note if enabled
                     if (playMidiOnDoorDestroy) {
-                      console.log("[Door Destroy] Queueing MIDI note for door destruction");
-                      setDoorSoundQueue(prev => [...prev, {
-                        type: 'midi',
-                        volume: midiVolume
-                      }]);
+                      console.log("[Door Destroy] Playing MIDI note for door destruction");
+                      playMidiNote(midiVolume);
                     }
                     
-                    // Queue music/sound if enabled
+                    // Play music/sound if enabled
                     if (playMusicOnDoorDestroy) {
-                      console.log("[Door Destroy] Queueing music for door destruction");
-                      setDoorSoundQueue(prev => [...prev, {
-                        type: 'music',
-                        volume: doorDestroyMusicVolume,
-                        customSound: useCustomSounds && customExitSound ? customExitSound : undefined
-                      }]);
+                      if (useCustomSounds && customExitSound) {
+                        // Custom exit sound handling with volume control
+                        const audioElement = new Audio(URL.createObjectURL(customExitSound));
+                        audioElement.volume = doorDestroyMusicVolume; // Use custom volume
+                        audioElement.play().catch(e => console.error("Erreur lors de la lecture du son personnalisé:", e));
+                      } else {
+                        // Standard sound
+                        playRandomSound();
+                      }
                     }
                   }).catch(err => {
                     console.error('[Door Destroy] Failed to resume sound context:', err);
                   });
                 } else {
-                  // Queue sounds immediately if context is active or unavailable
-                  // Queue MIDI note if enabled
+                  // Play sounds immediately if context is active or unavailable
+                  // Play MIDI note if enabled
                   if (playMidiOnDoorDestroy) {
-                    console.log("[Door Destroy] Queueing MIDI note for door destruction");
-                    setDoorSoundQueue(prev => [...prev, {
-                      type: 'midi',
-                      volume: midiVolume
-                    }]);
+                    console.log("[Door Destroy] Playing MIDI note for door destruction");
+                    playMidiNote(midiVolume);
                   }
                   
-                  // Queue music/sound if enabled
+                  // Play music/sound if enabled
                   if (playMusicOnDoorDestroy) {
-                    console.log("[Door Destroy] Queueing music for door destruction");
-                    setDoorSoundQueue(prev => [...prev, {
-                      type: 'music',
-                      volume: doorDestroyMusicVolume,
-                      customSound: useCustomSounds && customExitSound ? customExitSound : undefined
-                    }]);
+                    if (useCustomSounds && customExitSound) {
+                      // Custom exit sound handling with volume control
+                      const audioElement = new Audio(URL.createObjectURL(customExitSound));
+                      audioElement.volume = doorDestroyMusicVolume; // Use custom volume
+                      audioElement.play().catch(e => console.error("Erreur lors de la lecture du son personnalisé:", e));
+                } else {
+                      // Standard sound
+                  playRandomSound();
+                    }
                   }
                 }
                 
@@ -1313,7 +1237,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         requestRef.current = undefined;
       }
     };
-  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound, customWallSound, enableWallSound, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate, remainingCirclesPrefix, remainingCirclesBgColor, remainingCirclesTextColor, playMidiOnDoorDestroy, midiVolume, playMusicOnDoorDestroy, doorDestroyMusicVolume, doorSoundQueue]);
+  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound, customWallSound, enableWallSound, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate, remainingCirclesPrefix, remainingCirclesBgColor, remainingCirclesTextColor, playMidiOnDoorDestroy, midiVolume, playMusicOnDoorDestroy, doorDestroyMusicVolume]);
 
   // Fonction pour créer de nouvelles balles à l'emplacement d'un cercle détruit
   const createBallsOnDestroy = (centerX: number, centerY: number, circleRadius: number, sourceBall?: EnhancedBall): EnhancedBall[] => {
