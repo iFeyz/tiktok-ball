@@ -105,6 +105,7 @@ interface CollapsingRotatingCirclesProps extends GameProps {
   showFinalScore?: boolean;
   useCustomSounds?: boolean;
   customExitSound?: File;
+  customExitSoundVolume?: number;
   customWallSound?: File;
   enableWallSound?: boolean;
   maxBallCount?: number;
@@ -233,6 +234,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   showFinalScore = true,
   useCustomSounds = false,
   customExitSound,
+  customExitSoundVolume = 0.5,
   customWallSound,
   enableWallSound = true,
   maxBallCount = 20,
@@ -845,7 +847,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                       if (useCustomSounds && customExitSound) {
                         // Custom exit sound handling with volume control
                         const audioElement = new Audio(URL.createObjectURL(customExitSound));
-                        audioElement.volume = doorDestroyMusicVolume; // Use custom volume
+                        audioElement.volume = customExitSoundVolume;
                         audioElement.play().catch(e => console.error("Erreur lors de la lecture du son personnalisé:", e));
                       } else {
                         // Standard sound
@@ -868,11 +870,11 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                     if (useCustomSounds && customExitSound) {
                       // Custom exit sound handling with volume control
                       const audioElement = new Audio(URL.createObjectURL(customExitSound));
-                      audioElement.volume = doorDestroyMusicVolume; // Use custom volume
+                      audioElement.volume = customExitSoundVolume;
                       audioElement.play().catch(e => console.error("Erreur lors de la lecture du son personnalisé:", e));
-                } else {
+                    } else {
                       // Standard sound
-                  playRandomSound();
+                      playRandomSound();
                     }
                   }
                 }
@@ -1237,7 +1239,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         requestRef.current = undefined;
       }
     };
-  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound, customWallSound, enableWallSound, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate, remainingCirclesPrefix, remainingCirclesBgColor, remainingCirclesTextColor, playMidiOnDoorDestroy, midiVolume, playMusicOnDoorDestroy, doorDestroyMusicVolume]);
+  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound, customExitSoundVolume, customWallSound, enableWallSound, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate, remainingCirclesPrefix, remainingCirclesBgColor, remainingCirclesTextColor, playMidiOnDoorDestroy, midiVolume, playMusicOnDoorDestroy, doorDestroyMusicVolume]);
 
   // Fonction pour créer de nouvelles balles à l'emplacement d'un cercle détruit
   const createBallsOnDestroy = (centerX: number, centerY: number, circleRadius: number, sourceBall?: EnhancedBall): EnhancedBall[] => {

@@ -980,6 +980,7 @@ const GameSelector: React.FC = () => {
             showFinalScore={showFinalScore}
             useCustomSounds={useCirclesCustomSounds}
             customExitSound={customExitSound || undefined}
+            customExitSoundVolume={customExitSoundVolume}
             maxBallCount={maxBallCount}
             // Ajouter les nouvelles propriétés pour les images
             useCustomImages={useRotatingCirclesCustomImages}
@@ -2908,6 +2909,8 @@ const GameSelector: React.FC = () => {
 
   // Ajouter l'état pour le son personnalisé de passage de porte
   const [customExitSound, setCustomExitSound] = useState<File | null>(null);
+  // Add state for exit sound volume
+  const [customExitSoundVolume, setCustomExitSoundVolume] = useState<number>(0.5);
 
   // Ajouter la section pour gérer les sons personnalisés des cercles rotatifs
   const renderCirclesCustomSounds = () => {
@@ -2952,6 +2955,20 @@ const GameSelector: React.FC = () => {
                   <source src={URL.createObjectURL(customExitSound)} type={customExitSound.type} />
                   Votre navigateur ne supporte pas l'élément audio.
                 </audio>
+                
+                {/* Add volume control slider */}
+                <div className="volume-control" style={{ marginTop: '10px' }}>
+                  <label>Volume: {Math.round(customExitSoundVolume * 100)}%</label>
+                  <input 
+                    type="range" 
+                    min="0" 
+                    max="1" 
+                    step="0.05" 
+                    value={customExitSoundVolume}
+                    onChange={(e) => setCustomExitSoundVolume(parseFloat(e.target.value))}
+                    style={{ width: '100%' }}
+                  />
+                </div>
               </div>
             )}
           </div>
