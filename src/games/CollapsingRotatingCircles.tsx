@@ -82,6 +82,8 @@ interface CollapsingRotatingCirclesProps extends GameProps {
   minCircleRadius?: number; // Nouveau paramètre pour la taille minimale d'un cercle
   customEndMessage?: string; // Nouveau paramètre pour le message de fin personnalisé
   showFinalScore?: boolean; // Option pour afficher ou masquer le score final
+  useCustomSounds?: boolean; // Ajouter le support des sons personnalisés
+  customExitSound?: File; // Son personnalisé quand une balle passe une porte
 }
 
 interface CollapsingRotatingCirclesState {
@@ -116,7 +118,9 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   particleStyle = ParticleStyle.STANDARD, // Style de particules par défaut
   minCircleRadius = 20, // Taille minimale par défaut d'un cercle
   customEndMessage = "VICTOIRE !", // Valeur par défaut du message de fin
-  showFinalScore = true // Afficher le score final par défaut
+  showFinalScore = true, // Afficher le score final par défaut
+  useCustomSounds = false, // Par défaut, utiliser les sons standards
+  customExitSound
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
@@ -304,10 +308,12 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       
       // Calcul du décalage progressif de rotation basé sur l'index du cercle
       // Convertir le pourcentage en radians (un tour complet = 2*PI radians)
+      // Gérer à la fois les valeurs positives et négatives
       const progressiveOffset = (progressiveRotationOffset / 100) * (Math.PI * 2) * i;
       
       // Calcul de la vitesse de rotation avec un incrément progressif
-      // Chaque cercle tourne légèrement plus vite que le précédent
+      // Chaque cercle tourne légèrement plus vite ou plus lentement que le précédent
+      // Pour les valeurs négatives, la vitesse diminue avec l'index
       const speedIncrement = 1 + ((progressiveRotationOffset / 100) * i);
       const adjustedRotationSpeed = baseRotationSpeed * speedIncrement;
       
@@ -564,7 +570,18 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                 // Marquer le cercle comme détruit
                 circle.isDestroyed = true;
                 currentScore += 10;
-                playRandomSound();
+                
+                // Jouer le son de sortie (personnalisé ou standard)
+                if (useCustomSounds && customExitSound) {
+                  // Jouer le son personnalisé quand une balle passe une porte
+                  const audioElement = new Audio(URL.createObjectURL(customExitSound));
+                  audioElement.volume = 0.5; // Volume modéré
+                  audioElement.play().catch(e => console.error("Erreur lors de la lecture du son personnalisé:", e));
+                } else {
+                  // Jouer le son standard
+                  playRandomSound();
+                }
+                
                 justDestroyedCircle = true;
                 
                 // Créer des particules pour l'effet de destruction
@@ -870,7 +887,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         requestRef.current = undefined;
       }
     };
-  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore]);
+  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound]);
 
   // Fonction pour créer de nouvelles balles à l'emplacement d'un cercle détruit
   const createBallsOnDestroy = (centerX: number, centerY: number, circleRadius: number): Ball[] => {

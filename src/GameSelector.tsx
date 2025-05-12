@@ -88,6 +88,14 @@ const physicsPresets = {
 const soundTypes = ['bounce', 'grow', 'gameOver', 'wall'] as const;
 type SoundType = typeof soundTypes[number];
 
+// Mapping des noms conviviaux pour les types de sons
+const soundTypeNames: Record<string, string> = {
+  bounce: "de rebond",
+  grow: "de croissance",
+  gameOver: "de fin de jeu",
+  wall: "de collision avec mur"
+};
+
 // Définition du type TabType avant le composant
 type TabType = 'physics' | 'effects' | 'images' | 'sounds' | 'music' | 'sequence' | 'midi';
 
@@ -225,6 +233,9 @@ const GameSelector: React.FC = () => {
   // Ajouter les nouveaux états dans le composant GameSelector
   const [customEndMessage, setCustomEndMessage] = useState("VICTOIRE !");
   const [showFinalScore, setShowFinalScore] = useState(true);
+
+  // Ajouter un référence pour le son personnalisé de porte de sortie
+  const exitSoundFileInputRef = useRef<HTMLInputElement>(null);
 
   // Fonctions pour gérer les changements de style
   const handleExitStyleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -447,17 +458,13 @@ const GameSelector: React.FC = () => {
   };
   
   const handleSoundUpload = (e: React.ChangeEvent<HTMLInputElement>, soundType: SoundType) => {
-    if (e.target.files && e.target.files.length > 0) {
+    if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      
-      // Mise à jour du state
       setSoundFiles(prev => ({
         ...prev,
         [soundType]: file
       }));
-      
-      // Charger le son dans le système sonore
-      loadCustomSound(file, soundType);
+      console.log(`Son ${soundType} chargé:`, file.name);
     }
   };
   
@@ -493,19 +500,15 @@ const GameSelector: React.FC = () => {
   };
   
   const removeSoundFile = (soundType: SoundType) => {
-    // Mise à jour du state
     setSoundFiles(prev => {
-      const newFiles = { ...prev };
-      delete newFiles[soundType];
-      return newFiles;
+      const newSounds = { ...prev };
+      delete newSounds[soundType];
+      return newSounds;
     });
     
-    // Effacer le son dans le système sonore
-    clearCustomSound(soundType);
-    
-    // Réinitialiser l'élément input
-    if (soundFileRefs[soundType] && soundFileRefs[soundType].current) {
-      soundFileRefs[soundType].current!.value = '';
+    const inputElement = document.querySelector(`#${soundType}FileInput`) as HTMLInputElement;
+    if (inputElement) {
+      inputElement.value = '';
     }
   };
   
@@ -926,6 +929,8 @@ const GameSelector: React.FC = () => {
             minCircleRadius={minCircleRadius}
             customEndMessage={customEndMessage}
             showFinalScore={showFinalScore}
+            useCustomSounds={useCustomSounds}
+            customExitSound={customExitSound || undefined}
           />
         );
 
@@ -1075,17 +1080,12 @@ const GameSelector: React.FC = () => {
   
   // Render custom sounds interface
   const renderCustomSounds = () => {
-    if (selectedGame !== GameType.GROWING_BALL || isPlaying) {
-      return null;
-    }
-    
     return (
       <div className="custom-sounds-section">
-        <h4>Custom Sound Effects</h4>
-        
+        <h4>Sons Personnalisés</h4>
         <div className="sound-toggle-container">
           <label className="toggle-label">
-            Use Custom Sounds:
+            Utiliser des sons personnalisés:
             <button 
               className={`toggle-button ${useCustomSounds ? 'active' : ''}`}
               onClick={handleCustomSoundsToggle}
@@ -1095,56 +1095,68 @@ const GameSelector: React.FC = () => {
           </label>
         </div>
         
-        <div className={`sound-upload-container ${useCustomSounds ? 'active' : ''}`}>
-          {soundTypes.map(soundType => (
-            <div key={soundType} className="sound-item">
-              <div className="sound-type">
-                {soundType === 'wall' ? 'Wall Collision Sound:' : 
-                  soundType.charAt(0).toUpperCase() + soundType.slice(1) + ' Sound:'}
-              </div>
-              <div className="sound-controls">
-                <input
-                  type="file"
-                  ref={soundFileRefs[soundType]}
-                  onChange={(e) => handleSoundUpload(e, soundType)}
-                  accept="audio/*"
-                  className="file-input"
-                  style={{ display: 'none' }}
-                />
-                
-                <button
-                  className="upload-button"
-                  onClick={() => triggerSoundUpload(soundType)}
-                  disabled={!useCustomSounds}
-                >
-                  {soundFiles[soundType] ? 'Change Sound' : 'Upload Sound'}
-                </button>
-                
-                {soundFiles[soundType] && (
-                  <>
-                    <span className="sound-filename">
-                      {soundFiles[soundType]?.name 
-                        ? (soundFiles[soundType]!.name.length > 20 
-                           ? soundFiles[soundType]!.name.substring(0, 20) + '...' 
-                           : soundFiles[soundType]!.name)
-                        : 'No file selected'}
-                    </span>
+        {useCustomSounds && (
+          <>
+            <div className="sound-upload-container">
+              {soundTypes.map(soundType => (
+                <div className="sound-item" key={soundType}>
+                  <span className="sound-label">Son {soundTypeNames[soundType]}:</span>
+                  <div className="sound-buttons">
+                    <input
+                      type="file"
+                      id={`${soundType}FileInput`}
+                      onChange={(e) => handleSoundUpload(e, soundType)}
+                      accept="audio/*"
+                      style={{ display: 'none' }}
+                    />
                     <button 
-                      className="remove-sound"
-                      onClick={() => removeSoundFile(soundType)}
+                      className="upload-button" 
+                      onClick={() => triggerSoundUpload(soundType)}
                     >
-                      ×
+                      {soundFiles[soundType] ? '🔄 Changer' : '📤 Choisir un fichier'}
                     </button>
-                  </>
-                )}
+                    {soundFiles[soundType] && (
+                      <button 
+                        className="delete-button" 
+                        onClick={() => removeSoundFile(soundType)}
+                      >
+                        🗑️ Supprimer
+                      </button>
+                    )}
+                  </div>
+                  {soundFiles[soundType] && (
+                    <div className="sound-info">
+                      <span className="sound-filename">{soundFiles[soundType]?.name}</span>
+                      <audio controls>
+                        <source src={soundFiles[soundType] ? URL.createObjectURL(soundFiles[soundType]!) : ''} type={soundFiles[soundType]?.type} />
+                        Votre navigateur ne supporte pas l'élément audio.
+                      </audio>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            
+            {/* Ajouter la nouvelle section pour les sons des cercles rotatifs */}
+            {renderCirclesCustomSounds()}
+            
+            {/* Bouton pour les sons standards */}
+            <div className="standard-sounds-toggle">
+              <label className="toggle-label">
+                Sons standards en plus des sons personnalisés:
+                <button 
+                  className={`toggle-button ${standardSoundsEnabled ? 'active' : ''}`}
+                  onClick={handleStandardSoundsToggle}
+                >
+                  {standardSoundsEnabled ? 'ON' : 'OFF'}
+                </button>
+              </label>
+              <div className="control-hint">
+                Quand activé, les sons standards sont joués en plus des sons personnalisés. Sinon, seuls les sons personnalisés sont utilisés.
               </div>
             </div>
-          ))}
-          
-          {useCustomSounds && !Object.keys(soundFiles).length && (
-            <p className="upload-info">Upload at least one sound file to use custom sounds.</p>
-          )}
-        </div>
+          </>
+        )}
       </div>
     );
   };
@@ -2290,14 +2302,14 @@ const GameSelector: React.FC = () => {
           <label>Décalage progressif: {progressiveRotationOffset}%</label>
           <input 
             type="range" 
-            min="0" 
+            min="-20" 
             max="20" 
             step="1" 
             value={progressiveRotationOffset}
             onChange={handleProgressiveRotationOffsetChange}
           />
           <div className="control-hint">
-            Crée un motif en spirale en décalant chaque cercle et sa vitesse de rotation (0% = tous alignés)
+            Crée un motif en spirale en décalant chaque cercle et sa vitesse de rotation (-20% à +20%, 0% = tous alignés)
           </div>
         </div>
         
@@ -2512,6 +2524,84 @@ const GameSelector: React.FC = () => {
   // Fonction pour gérer le changement du nombre de balles à créer
   const handleBallsOnDestroyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setBallsOnDestroy(parseInt(e.target.value));
+  };
+
+  // Fonction pour déclencher l'upload du son de passage de porte
+  const triggerExitSoundUpload = () => {
+    if (exitSoundFileInputRef.current) {
+      exitSoundFileInputRef.current.click();
+    }
+  };
+
+  // Fonction pour gérer l'upload du son de passage de porte
+  const handleExitSoundUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setCustomExitSound(file);
+      console.log("Son de passage de porte chargé:", file.name);
+    }
+  };
+
+  // Fonction pour supprimer le son personnalisé de passage de porte
+  const removeExitSoundFile = () => {
+    setCustomExitSound(null);
+    if (exitSoundFileInputRef.current) {
+      exitSoundFileInputRef.current.value = '';
+    }
+  };
+
+  // Ajouter l'état pour le son personnalisé de passage de porte
+  const [customExitSound, setCustomExitSound] = useState<File | null>(null);
+
+  // Ajouter la section pour gérer les sons personnalisés des cercles rotatifs
+  const renderCirclesCustomSounds = () => {
+    if (selectedGame !== GameType.COLLAPSING_ROTATING_CIRCLES || !useCustomSounds) {
+      return null;
+    }
+
+    return (
+      <div className="custom-sounds-section">
+        <h4>Sons Personnalisés - Cercles Rotatifs</h4>
+        
+        <div className="sound-upload-container">
+          <div className="sound-item">
+            <span className="sound-label">Son de passage de porte:</span>
+            <div className="sound-buttons">
+              <input
+                type="file"
+                ref={exitSoundFileInputRef}
+                onChange={handleExitSoundUpload}
+                accept="audio/*"
+                style={{ display: 'none' }}
+              />
+              <button 
+                className="upload-button" 
+                onClick={triggerExitSoundUpload}
+              >
+                {customExitSound ? '🔄 Changer' : '📤 Choisir un fichier'}
+              </button>
+              {customExitSound && (
+                <button 
+                  className="delete-button" 
+                  onClick={removeExitSoundFile}
+                >
+                  🗑️ Supprimer
+                </button>
+              )}
+            </div>
+            {customExitSound && (
+              <div className="sound-info">
+                <span className="sound-filename">{customExitSound.name}</span>
+                <audio controls>
+                  <source src={URL.createObjectURL(customExitSound)} type={customExitSound.type} />
+                  Votre navigateur ne supporte pas l'élément audio.
+                </audio>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // Render function for the main component with sidebar layout
