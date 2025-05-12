@@ -198,6 +198,12 @@ const GameSelector: React.FC = () => {
   const [midiInstrumentPreset, setMidiInstrumentPreset] = useState<MIDIInstrumentPresetKey>(MIDI_INSTRUMENT_PRESETS.DEFAULT_CYCLING);
   const midiFileRef = useRef<HTMLInputElement>(null);
   
+  // Ajouter les états pour les sons de destruction de porte (cercles rotatifs)
+  const [rotatingCirclesPlayMidiOnDoorDestroy, setRotatingCirclesPlayMidiOnDoorDestroy] = useState<boolean>(false);
+  const [rotatingCirclesMidiVolume, setRotatingCirclesMidiVolume] = useState<number>(0.7);
+  const [rotatingCirclesPlayMusicOnDoorDestroy, setRotatingCirclesPlayMusicOnDoorDestroy] = useState<boolean>(true);
+  const [rotatingCirclesDoorDestroyMusicVolume, setRotatingCirclesDoorDestroyMusicVolume] = useState<number>(0.5);
+  
   // Ajout des états pour les paramètres spécifiques à CollapsingRotatingCircles
   const [initialCircleCount, setInitialCircleCount] = useState(5);
   const [circleGap, setCircleGap] = useState(40);
@@ -988,6 +994,11 @@ const GameSelector: React.FC = () => {
             remainingCirclesTextColor={remainingCirclesTextColor}
             // Ajouter la propriété pour l'enregistrement
             isRecording={isRecording}
+            // Ajouter les propriétés pour les sons de destruction de porte
+            playMidiOnDoorDestroy={rotatingCirclesPlayMidiOnDoorDestroy}
+            midiVolume={rotatingCirclesMidiVolume}
+            playMusicOnDoorDestroy={rotatingCirclesPlayMusicOnDoorDestroy}
+            doorDestroyMusicVolume={rotatingCirclesDoorDestroyMusicVolume}
           />
         );
 
@@ -2289,6 +2300,75 @@ const GameSelector: React.FC = () => {
             suivant la séquence de notes de votre fichier MIDI.
           </p>
         </div>
+
+        {/* Add new section for door destruction sounds */}
+        <div className="circle-destruction-sounds" style={{ 
+          marginTop: '30px', 
+          padding: '15px', 
+          backgroundColor: 'rgba(64, 192, 128, 0.1)', 
+          borderRadius: '5px',
+          border: '1px solid rgba(64, 192, 128, 0.3)'
+        }}>
+          <h4 style={{ margin: '0 0 15px 0', color: '#40c080' }}>Sons pour la destruction des portes</h4>
+          
+          <div className="toggle-control">
+            <label className="toggle-label">
+              Jouer une note MIDI à la destruction:
+              <button 
+                className={`toggle-button ${rotatingCirclesPlayMidiOnDoorDestroy ? 'active' : ''}`}
+                onClick={handleRotatingCirclesPlayMidiOnDoorDestroy}
+              >
+                {rotatingCirclesPlayMidiOnDoorDestroy ? 'ON' : 'OFF'}
+              </button>
+            </label>
+            <div className="control-hint">
+              Joue une note MIDI chaque fois qu'une porte est détruite
+            </div>
+          </div>
+          
+          {rotatingCirclesPlayMidiOnDoorDestroy && (
+            <div className="volume-slider">
+              <label>Volume MIDI (destruction): {Math.round(rotatingCirclesMidiVolume * 100)}%</label>
+              <input 
+                type="range" 
+                min="0.01" 
+                max="1" 
+                step="0.01" 
+                value={rotatingCirclesMidiVolume}
+                onChange={handleRotatingCirclesMidiVolumeChange}
+              />
+            </div>
+          )}
+          
+          <div className="toggle-control" style={{ marginTop: '15px' }}>
+            <label className="toggle-label">
+              Jouer un son à la destruction:
+              <button 
+                className={`toggle-button ${rotatingCirclesPlayMusicOnDoorDestroy ? 'active' : ''}`}
+                onClick={handleRotatingCirclesPlayMusicOnDoorDestroy}
+              >
+                {rotatingCirclesPlayMusicOnDoorDestroy ? 'ON' : 'OFF'}
+              </button>
+            </label>
+            <div className="control-hint">
+              Joue un son de musique chaque fois qu'une porte est détruite
+            </div>
+          </div>
+          
+          {rotatingCirclesPlayMusicOnDoorDestroy && (
+            <div className="volume-slider">
+              <label>Volume musique (destruction): {Math.round(rotatingCirclesDoorDestroyMusicVolume * 100)}%</label>
+              <input 
+                type="range" 
+                min="0.01" 
+                max="1" 
+                step="0.01" 
+                value={rotatingCirclesDoorDestroyMusicVolume}
+                onChange={handleRotatingCirclesDoorDestroyMusicVolumeChange}
+              />
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -3107,6 +3187,23 @@ const GameSelector: React.FC = () => {
         )}
       </div>
     );
+  };
+
+  // Add handlers for the rotating circles door destruction MIDI settings
+  const handleRotatingCirclesPlayMidiOnDoorDestroy = () => {
+    setRotatingCirclesPlayMidiOnDoorDestroy(!rotatingCirclesPlayMidiOnDoorDestroy);
+  };
+
+  const handleRotatingCirclesMidiVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setRotatingCirclesMidiVolume(parseFloat(e.target.value));
+  };
+
+  const handleRotatingCirclesPlayMusicOnDoorDestroy = () => {
+    setRotatingCirclesPlayMusicOnDoorDestroy(!rotatingCirclesPlayMusicOnDoorDestroy);
+  };
+
+  const handleRotatingCirclesDoorDestroyMusicVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setRotatingCirclesDoorDestroyMusicVolume(parseFloat(e.target.value));
   };
 
   // Render function for the main component with sidebar layout

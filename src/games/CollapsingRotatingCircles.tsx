@@ -1,4 +1,9 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { 
+    useCallback, 
+    useEffect, 
+    useRef, 
+    useState 
+  } from 'react';
 import { GameProps, Ball, Vector2D } from '../types';
 import { 
   getRandomPastelColor,
@@ -19,17 +24,10 @@ import {
   connectToRecorder,
   playWallSound,
   hasCustomSound,
-  loadCustomSound
+  loadCustomSound,
+  playMIDINote as playMidiNote
 } from '../utils/sounds';
-import { 
-  initializeRecorder, 
-  startRecording as startGameRecording, 
-  stopRecording as stopGameRecording,
-  isRecording as checkIsRecording, 
-  downloadRecording,
-  getAudioDestination
-} from '../utils/gameRecorder';
-import { useGameRecorder } from '../utils/recorder';
+import { useGameRecorder, downloadVideo } from '../utils/recorder';
 
 // Définir et exporter les styles de porte disponibles
 export enum ExitStyle {
@@ -83,6 +81,13 @@ interface EnhancedBall extends Ball {
   growthRate?: number;
 }
 
+// Audio queue system for door destruction sounds
+interface DoorDestructionSound {
+  type: 'midi' | 'music';
+  volume: number;
+  customSound?: File;
+}
+
 interface CollapsingRotatingCirclesProps extends GameProps {
   gravity?: number;
   bounciness?: number;
@@ -123,6 +128,11 @@ interface CollapsingRotatingCirclesProps extends GameProps {
   remainingCirclesTextColor?: string; // Couleur du texte des cercles restants
   // Propriété pour l'enregistrement
   isRecording?: boolean;
+  // Add new props for door destruction sounds
+  playMidiOnDoorDestroy?: boolean; // Whether to play MIDI notes when door is destroyed
+  midiVolume?: number; // Volume for MIDI notes (0-1)
+  playMusicOnDoorDestroy?: boolean; // Whether to play music/sound when door is destroyed
+  doorDestroyMusicVolume?: number; // Volume for door destroy music/sound (0-1)
 }
 
 interface CollapsingRotatingCirclesState {
@@ -245,7 +255,12 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   remainingCirclesBgColor = "#ffffff",
   remainingCirclesTextColor = "#000000",
   // Propriété pour l'enregistrement
-  isRecording
+  isRecording,
+  // Add new props with defaults
+  playMidiOnDoorDestroy = false,
+  midiVolume = 0.7,
+  playMusicOnDoorDestroy = true,
+  doorDestroyMusicVolume = 0.5,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
@@ -302,6 +317,74 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       // ... potentially load other custom sounds if needed ...
     }
   }, [useCustomSounds, customWallSound]);
+
+  // Add state for audio queue
+  const [doorSoundQueue, setDoorSoundQueue] = useState<DoorDestructionSound[]>([]);
+  const [isPlayingDoorSound, setIsPlayingDoorSound] = useState(false);
+
+  // Add effect to process the door sound queue
+  useEffect(() => {
+    if (doorSoundQueue.length > 0 && !isPlayingDoorSound) {
+      setIsPlayingDoorSound(true);
+      const nextSound = doorSoundQueue[0];
+      
+      // Play the next sound
+      if (nextSound.type === 'midi') {
+        console.log("[Door Sound Queue] Playing queued MIDI note");
+        // Correction: playMidiNote doesn't return a Promise
+        playMidiNote(nextSound.volume);
+        // Use a timeout to simulate the duration of the MIDI note
+        setTimeout(() => {
+          // Remove the sound from the queue and allow next sound to play
+          setDoorSoundQueue(prev => prev.slice(1));
+          setIsPlayingDoorSound(false);
+        }, 120); // Reduced from 500ms to 250ms
+      } else if (nextSound.type === 'music') {
+        console.log("[Door Sound Queue] Playing queued music sound");
+        if (useCustomSounds && nextSound.customSound) {
+          const audioElement = new Audio(URL.createObjectURL(nextSound.customSound));
+          audioElement.volume = nextSound.volume;
+          
+          // Set up event listener to handle when audio finishes
+          audioElement.onended = () => {
+            setDoorSoundQueue(prev => prev.slice(1));
+            setIsPlayingDoorSound(false);
+          };
+          
+          // Add timeupdate listener to allow next sound to play sooner
+          audioElement.ontimeupdate = () => {
+            // If we've played at least 300ms of the sound, we can proceed to the next sound
+            if (audioElement.currentTime >= 0.3) {
+              audioElement.ontimeupdate = null;
+              setDoorSoundQueue(prev => prev.slice(1));
+              setIsPlayingDoorSound(false);
+            }
+          };
+          
+          // Handle errors
+          audioElement.onerror = () => {
+            console.error("[Door Sound Queue] Error playing custom sound");
+            setDoorSoundQueue(prev => prev.slice(1));
+            setIsPlayingDoorSound(false);
+          };
+          
+          audioElement.play().catch((e: Error) => {
+            console.error("Erreur lors de la lecture du son personnalisé:", e);
+            setDoorSoundQueue(prev => prev.slice(1));
+            setIsPlayingDoorSound(false);
+          });
+        } else {
+          // Play random sound with a timeout to simulate its duration
+          playRandomSound();
+          // Use a timeout to simulate sound duration
+          setTimeout(() => {
+            setDoorSoundQueue(prev => prev.slice(1));
+            setIsPlayingDoorSound(false);
+          }, 300); // Reduced from 700ms to 300ms
+        }
+      }
+    }
+  }, [doorSoundQueue, isPlayingDoorSound, useCustomSounds]);
 
   // Fonction pour créer des particules lors de la destruction d'un cercle
   const createDestructionParticles = (centerX: number, centerY: number, circleRadius: number, circleColor: string) => {
@@ -814,48 +897,60 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                 // Stocker la balle qui a touché la porte
                 gameState.lastBallToTouchCircle = ball;
                 
-                // Jouer le son de sortie (personnalisé ou standard)
-                if (useCustomSounds && customExitSound) {
-                  // --- MODIFIED CUSTOM SOUND PLAYBACK ---
-                  const soundAudioCtx = getSoundAudioContext();
-                  if (soundAudioCtx) {
-                    const audioElement = new Audio(URL.createObjectURL(customExitSound));
-                    audioElement.volume = 0.5; // Volume modéré
-
-                    const sourceNode = soundAudioCtx.createMediaElementSource(audioElement);
-                    
-                    // Connect to main output (e.g., masterGainNode or directly to destination)
-                    // Assuming masterGainNode is accessible or handled in sounds.ts connect logic if not directly here
-                    // For simplicity, connecting to destination here, but ideally through a master gain
-                    sourceNode.connect(soundAudioCtx.destination);
-
-                    // Also connect to recorder destination if available
-                    const recorderDest = getAudioDestination(); // Assuming getAudioDestination is available from useGameRecorder
-                    if (recorderDest && recorderDest.context === soundAudioCtx) {
-                      console.log('[CRC Custom Sound] Connecting custom exit sound to recorder destination.');
-                      sourceNode.connect(recorderDest);
-                    } else if (recorderDest) {
-                      console.warn('[CRC Custom Sound] Custom exit sound AudioContext does not match recorder AudioContext. Sound may not be recorded.');
-                    } else {
-                      console.warn('[CRC Custom Sound] Recorder destination not available for custom exit sound.');
+                // Initialiser le sound context si nécessaire avant de jouer des sons
+                let soundCtx = getSoundAudioContext();
+                if (!soundCtx) {
+                  console.log('[Door Destroy] Sound context not found, initializing sound system...');
+                  initSound();
+                  soundCtx = getSoundAudioContext();
+                }
+                
+                // Assurer que le contexte audio est actif
+                if (soundCtx && soundCtx.state === 'suspended') {
+                  console.log('[Door Destroy] Sound context is suspended, attempting to resume...');
+                  soundCtx.resume().then(() => {
+                    // Add sounds to queue instead of playing immediately
+                    // Queue MIDI note if enabled
+                    if (playMidiOnDoorDestroy) {
+                      console.log("[Door Destroy] Queueing MIDI note for door destruction");
+                      setDoorSoundQueue(prev => [...prev, {
+                        type: 'midi',
+                        volume: midiVolume
+                      }]);
                     }
-
-                    audioElement.play().catch(e => console.error("Erreur lors de la lecture du son personnalisé:", e));
-                    audioElement.onended = () => {
-                      sourceNode.disconnect(); // Clean up connections when done
-                      URL.revokeObjectURL(audioElement.src); // Revoke object URL
-                    };
-                  } else {
-                    console.error("Contexte audio non disponible pour le son de sortie personnalisé.");
-                    // Fallback to simple play if context fails, though it won't be recorded
-                    const audioElement = new Audio(URL.createObjectURL(customExitSound));
-                    audioElement.volume = 0.5;
-                    audioElement.play().catch(e => console.error("Erreur lors de la lecture du son personnalisé (fallback):", e));
-                  }
-                  // --- END MODIFIED CUSTOM SOUND PLAYBACK ---
+                    
+                    // Queue music/sound if enabled
+                    if (playMusicOnDoorDestroy) {
+                      console.log("[Door Destroy] Queueing music for door destruction");
+                      setDoorSoundQueue(prev => [...prev, {
+                        type: 'music',
+                        volume: doorDestroyMusicVolume,
+                        customSound: useCustomSounds && customExitSound ? customExitSound : undefined
+                      }]);
+                    }
+                  }).catch(err => {
+                    console.error('[Door Destroy] Failed to resume sound context:', err);
+                  });
                 } else {
-                  // Jouer le son standard
-                  playRandomSound();
+                  // Queue sounds immediately if context is active or unavailable
+                  // Queue MIDI note if enabled
+                  if (playMidiOnDoorDestroy) {
+                    console.log("[Door Destroy] Queueing MIDI note for door destruction");
+                    setDoorSoundQueue(prev => [...prev, {
+                      type: 'midi',
+                      volume: midiVolume
+                    }]);
+                  }
+                  
+                  // Queue music/sound if enabled
+                  if (playMusicOnDoorDestroy) {
+                    console.log("[Door Destroy] Queueing music for door destruction");
+                    setDoorSoundQueue(prev => [...prev, {
+                      type: 'music',
+                      volume: doorDestroyMusicVolume,
+                      customSound: useCustomSounds && customExitSound ? customExitSound : undefined
+                    }]);
+                  }
                 }
                 
                 justDestroyedCircle = true;
@@ -1218,7 +1313,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         requestRef.current = undefined;
       }
     };
-  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound, customWallSound, enableWallSound, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate, remainingCirclesPrefix, remainingCirclesBgColor, remainingCirclesTextColor]);
+  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound, customWallSound, enableWallSound, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate, remainingCirclesPrefix, remainingCirclesBgColor, remainingCirclesTextColor, playMidiOnDoorDestroy, midiVolume, playMusicOnDoorDestroy, doorDestroyMusicVolume, doorSoundQueue]);
 
   // Fonction pour créer de nouvelles balles à l'emplacement d'un cercle détruit
   const createBallsOnDestroy = (centerX: number, centerY: number, circleRadius: number, sourceBall?: EnhancedBall): EnhancedBall[] => {
@@ -1282,14 +1377,12 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   
   // Utiliser le hook useGameRecorder pour l'enregistrement
   const { 
+    startRecording, 
+    stopRecording, 
     isRecording: isRecordingActive, 
-    recordingTime, 
-    videoBlob, 
-    startRecording: startVideoRecording, 
-    stopRecording: stopVideoRecording, 
-    downloadGameplayVideo,
-    getAudioDestination,
-    setupAudioRecording
+    videoBlob,
+    recordingTime,
+    downloadGameplayVideo
   } = useGameRecorder();
 
   // Fonction pour basculer l'enregistrement
@@ -1312,18 +1405,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
 
     // Define the next step: setup recorder audio and toggle recording state
     const proceedWithToggle = (finalSoundCtx: AudioContext | null) => {
-      if (finalSoundCtx) {
-        console.log('[CRC Recording] Passing sound system context to recorder setup. State:', finalSoundCtx.state);
-        // Explicitly set up the recorder's audio using the sound system's context.
-        // This initializes the recorder's destination node.
-        setupAudioRecording(finalSoundCtx); 
-      } else {
-        console.warn('[CRC Recording] Sound context is null. Recorder will attempt to set up its own audio context.');
-        // Let recorder setup its own context if sound system's context is unavailable
-        setupAudioRecording(); 
-      }
-      // Now that the recorder's audio destination is guaranteed to be initialized (using the correct context if possible),
-      // call the handler which will connect sounds.ts to it and start the MediaRecorder.
+      // Now call the handler which will connect sounds.ts and start recording
       handleRecordingToggle(); 
     };
 
@@ -1335,7 +1417,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         proceedWithToggle(soundCtx); // Proceed with the resumed context
       }).catch(err => {
         console.error('[CRC Recording] Failed to resume sound system audio context:', err);
-        proceedWithToggle(null); // Proceed, but recorder will try to initialize its own audio
+        proceedWithToggle(null); // Proceed anyway
       });
     } else {
       // Context is active, was never suspended, or is null (initialization failed)
@@ -1347,7 +1429,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       proceedWithToggle(soundCtx); // Proceed with current context (or null)
     }
   };
-
+  
   // Handler function for the actual recording start/stop logic
   const handleRecordingToggle = () => {
     const canvas = canvasRef.current;
@@ -1355,39 +1437,55 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
 
     if (isRecordingActive) {
       console.log("Arrêt de l'enregistrement...");
-      stopVideoRecording()
-        .then(blob => {
-          if (blob) {
+      stopRecording()
+      .then(blob => {
+        if (blob) {
             console.log(`Enregistrement terminé, taille: ${blob.size} bytes`);
-          } else {
+        } else {
             console.error("Stop recording returned no blob.");
-          }
-        })
-        .catch(error => {
+        }
+      })
+      .catch(error => {
           console.error("Erreur lors de l'arrêt de l'enregistrement:", error);
         });
     } else {
       console.log("Démarrage de l'enregistrement avec capture audio...");
       
-      // Get the recorder destination node
-      const destination = getAudioDestination(); 
-      if (destination) {
-        // Connect the sound system to the recorder destination right before starting
+      // Get the sound audio context
+      const soundCtx = getSoundAudioContext();
+      if (soundCtx) {
+        // Connect the sound system to the recorder
         console.log("Connexion du système audio à l'enregistreur...");
-        connectToRecorder(destination);
+        // The hook will handle this internally
       } else {
-        console.error("Destination audio non disponible pour l'enregistrement. L'audio ne sera pas enregistré.");
+        console.error("Contexte audio non disponible pour l'enregistrement. L'audio ne sera pas enregistré.");
       }
       
-      // Start recording using the hook's function with increased quality
-      startVideoRecording(canvas, 60000, { 
-        frameRate: 30,
-        videoBitsPerSecond: 8000000, // INCREASED QUALITY: 8 Mbps
-        captureAudio: true 
-      }).catch(error => {
-        console.error("Échec du démarrage de l'enregistrement:", error);
-        alert("Impossible de démarrer l'enregistrement. Vérifiez les autorisations du navigateur ou réessayez.");
-      });
+      // High quality recording options
+      const recordingOptions = {
+        frameRate: 60, // Higher frame rate for smoother motion
+        videoBitsPerSecond: 20000000, // ULTRA QUALITY: 20 Mbps for maximum detail
+        captureAudio: true
+      };
+      
+      // Start recording using the hook's function with maximum quality settings
+      startRecording(canvas, 60000, recordingOptions)
+        .catch(error => {
+          console.error("Échec du démarrage de l'enregistrement:", error);
+          
+          // Fallback to default codec with slightly lower bitrate but still high quality
+          const fallbackOptions = {
+            frameRate: 60,
+            videoBitsPerSecond: 15000000, // Still high quality in fallback
+            captureAudio: true
+          };
+          
+          startRecording(canvas, 60000, fallbackOptions)
+            .catch(fallbackError => {
+              console.error("Échec du démarrage de l'enregistrement avec paramètres de secours:", fallbackError);
+              alert("Impossible de démarrer l'enregistrement. Vérifiez les autorisations du navigateur ou réessayez.");
+            });
+        });
     }
   };
   
@@ -1411,7 +1509,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       {isRecordingActive && (
         <div style={recordingStyles.container}>
           <div style={recordingStyles.recordIcon}></div>
-          <div style={recordingStyles.time}>{formatRecordingTime(recordingTime)}</div>
+          <div style={recordingStyles.time}>{formatRecordingTime(recordingTime || 0)}</div>
         </div>
       )}
       {/* Ajouter les contrôles d'enregistrement */}
@@ -1419,7 +1517,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         <div style={recordingControlsStyles.container}>
           <button 
             onClick={toggleRecording} 
-            style={{
+          style={{ 
               ...recordingControlsStyles.button, 
               ...recordingControlsStyles.recordButton
             }}
