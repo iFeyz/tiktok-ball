@@ -1123,11 +1123,28 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
             // Add additional checks for polygons
             let isNearEdge = true;
             if (sides > 0) {
-              // For polygons, check if the ball is near an edge
+              // For polygons, we need to check edge collision more precisely
               const angleStep = (Math.PI * 2) / sides;
               let nearestEdgeDistance = Infinity;
               
+              // Find which vertex indices are affected by the exit
+              const startVertexIndex = Math.floor(circle.rotation / angleStep);
+              const endVertexIndex = Math.ceil((circle.rotation + exitSizeRad) / angleStep);
+              
+              // Calculate actual angles of these vertices (same as drawing code)
+              const actualStartAngle = circle.rotation + startVertexIndex * angleStep;
+              const actualEndAngle = circle.rotation + endVertexIndex * angleStep;
+              
+              // Check if the ball is colliding with any edge except the door
+              let collidesWithEdge = false;
+              
               for (let i = 0; i < sides; i++) {
+                // Skip the edge that contains our door
+                if (i >= startVertexIndex && i < endVertexIndex) {
+                  continue;
+                }
+                
+                // Calculate edge points
                 const angle1 = circle.rotation + i * angleStep;
                 const angle2 = circle.rotation + ((i + 1) % sides) * angleStep;
                 
@@ -1136,16 +1153,28 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                 const edgeX2 = centerX + circle.radius * Math.cos(angle2);
                 const edgeY2 = centerY + circle.radius * Math.sin(angle2);
                 
-                // Calculate distance from ball to edge line segment
+                // Calculate distance from ball to edge
                 const edgeDist = distanceToLineSegment(
                   ball.position.x, ball.position.y,
                   edgeX1, edgeY1, edgeX2, edgeY2
                 );
                 
+                // Check if the ball is colliding with this edge
+                if (edgeDist <= ball.radius) {
+                  collidesWithEdge = true;
+                  nearestEdgeDistance = edgeDist;
+                  break;
+                }
+                
                 nearestEdgeDistance = Math.min(nearestEdgeDistance, edgeDist);
               }
               
-              isNearEdge = nearestEdgeDistance <= ball.radius * 1.5;
+              // Check if the ball is within the exit angle range
+              const ballAngleRelative = (normalizedBallAngle - circle.rotation + Math.PI * 2) % (Math.PI * 2);
+              const isWithinExitAngle = ballAngleRelative >= 0 && ballAngleRelative <= exitSizeRad;
+              
+              // Ball is near a non-exit edge if it's colliding with an edge and not in the exit angle
+              isNearEdge = collidesWithEdge && !isWithinExitAngle;
             }
             
             // Vérifier si la balle est dans la "porte de sortie" avec une marge supplémentaire pour faciliter le passage
@@ -1167,7 +1196,10 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
             ) > 0;
             
             // Si la balle est dans la porte ET se dirige vers l'extérieur, la laisser passer
-            if (isInExit && movingOutward && isNearEdge) {
+            // Pour les polygones, isNearEdge est true quand la balle touche un bord qui n'est PAS la porte
+            // Pour les cercles, isNearEdge est toujours true
+            // Pour les polygones, on doit donc utiliser !isNearEdge pour vérifier que la balle n'est PAS sur un bord non-porte
+            if (isInExit && movingOutward) {
               // La balle s'échappe par la porte !
               if (ballDistFromCenter > circle.radius - ball.radius / 2) { // Moins strict sur la condition de distance
                 // Marquer le cercle comme détruit
@@ -1459,20 +1491,45 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
           ctx.lineWidth = circleStrokeWidth; // Use the custom stroke width
           ctx.stroke();
         } else {
-          // Draw polygon
-          ctx.save();
-          drawRegularPolygon(
-            ctx,
-            centerX,
-            centerY,
-            circle.radius,
-            sides,
-            circle.rotation + exitSizeRad
-          );
+          // Draw polygon with a gap for the door
+          ctx.beginPath();
+          const angleStep = (Math.PI * 2) / sides;
+          
+          // Calculate door points precisely
+          const doorStartAngle = circle.rotation;
+          const doorEndAngle = circle.rotation + exitSizeRad;
+          
+          // We need to ensure the door is placed at a position that aligns with polygon edges
+          // for proper collision detection
+          
+          // Find the index of vertex closest to doorStartAngle
+          let startVertexIndex = Math.floor((doorStartAngle - circle.rotation) / angleStep);
+          let endVertexIndex = Math.ceil((doorEndAngle - circle.rotation) / angleStep);
+          
+          // Calculate actual angles of these vertices
+          const actualStartAngle = circle.rotation + startVertexIndex * angleStep;
+          const actualEndAngle = circle.rotation + endVertexIndex * angleStep;
+          
+          // Start drawing from the end of the door
+          const endDoorX = centerX + circle.radius * Math.cos(actualEndAngle);
+          const endDoorY = centerY + circle.radius * Math.sin(actualEndAngle);
+          ctx.moveTo(endDoorX, endDoorY);
+          
+          // Draw the polygon, one segment at a time
+          for (let i = endVertexIndex; i <= sides + startVertexIndex; i++) {
+            const vertexIndex = i % sides;
+            const angle = circle.rotation + vertexIndex * angleStep;
+            
+            const x = centerX + circle.radius * Math.cos(angle);
+            const y = centerY + circle.radius * Math.sin(angle);
+            
+            ctx.lineTo(x, y);
+          }
+          
+          // Apply stroke
           ctx.strokeStyle = circleColor;
           ctx.lineWidth = circleStrokeWidth;
           ctx.stroke();
-          ctx.restore();
         }
         
         // Marquer visuellement la porte de sortie selon le style choisi
@@ -1489,49 +1546,17 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
               false
             );
           } else {
-            // Create exit for polygon
-            ctx.beginPath();
-            
-            // Draw the exit as a wedge from center
-            ctx.moveTo(centerX, centerY);
-            const startAngle = circle.rotation;
-            const endAngle = circle.rotation + exitSizeRad;
-            const midPoint = startAngle + (exitSizeRad / 2);
-            
-            // Calculate points for the exit arc
-            const x1 = centerX + circle.radius * Math.cos(startAngle);
-            const y1 = centerY + circle.radius * Math.sin(startAngle);
-            const x2 = centerX + circle.radius * Math.cos(endAngle);
-            const y2 = centerY + circle.radius * Math.sin(endAngle);
-            
-            // Draw the wedge
-            ctx.moveTo(centerX, centerY);
-            ctx.lineTo(x1, y1);
-            
-            // For non-circle shapes, use a straight line for small exit sizes
-            // and an arc approximation for larger ones
-            if (exitSizeRad < Math.PI / 4) {
-              ctx.lineTo(x2, y2);
-            } else {
-              // For larger exits, add intermediate points to create a curve
-              const steps = Math.ceil(exitSizeRad * 5 / Math.PI); // More steps for larger arcs
-              for (let i = 1; i < steps; i++) {
-                const angle = startAngle + (exitSizeRad * i / steps);
-                const x = centerX + circle.radius * Math.cos(angle);
-                const y = centerY + circle.radius * Math.sin(angle);
-                ctx.lineTo(x, y);
-              }
-              ctx.lineTo(x2, y2);
-            }
-            
-            ctx.closePath();
+            // For polygons, we don't need to draw anything - the gap has already been created
+            // in the main polygon drawing section. This exactly matches how circle doors work.
+            return;
           }
           
           // Appliquer un style différent selon l'option choisie
           switch(exitStyle) {
             case ExitStyle.STANDARD:
-              ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)'; // Style standard
-              ctx.lineWidth = circleStrokeWidth + 2; // Slightly thicker for the exit
+              // Use the same style for both circles and polygons
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+              ctx.lineWidth = circleStrokeWidth + 2;
               break;
               
             case ExitStyle.INVERTED:
@@ -1564,7 +1589,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
               ctx.lineWidth = circleStrokeWidth + 2;
               break;
               
-            case ExitStyle.GLOWING:
+            case ExitStyle.GLOWING: {
               // Effet brillant avec gradient et largeur variable
               const gradient = ctx.createLinearGradient(
                 centerX, 
@@ -1583,8 +1608,9 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
               ctx.shadowColor = 'white';
               ctx.shadowBlur = 15;
               break;
+            }
               
-            case ExitStyle.COLORFUL:
+            case ExitStyle.COLORFUL: {
               // Effet multicolore avec dégradé arc-en-ciel
               const rainbow = ctx.createLinearGradient(
                 centerX - circle.radius, 
@@ -1602,6 +1628,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
               ctx.strokeStyle = rainbow;
               ctx.lineWidth = circleStrokeWidth + 2;
               break;
+            }
           }
           
           // Si style brillant, dessiner la porte puis réinitialiser l'ombre

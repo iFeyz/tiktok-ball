@@ -1210,1503 +1210,1510 @@ const GrowingBall: React.FC<GrowingBallProps> = ({
         }));
       }
         
+      // Trier les balles par score pour que la balle avec le plus gros score soit dessinée en dernier (au-dessus)
+      const sortedBalls = [...updatedBalls].sort((a, b) => {
+        const scoreA = (a as EnhancedBall).score || 0;
+        const scoreB = (b as EnhancedBall).score || 0;
+        return scoreA - scoreB;
+      });
+        
       // Dessiner les balles avec rotation pour plus de réalisme
-        updatedBalls.forEach(ball => {
-          const enhancedBall = ball as EnhancedBall;
+      sortedBalls.forEach(ball => {
+        const enhancedBall = ball as EnhancedBall;
+        
+        // Draw glow effect if enabled
+        if (effectsEnabled) {
+        // Extract HSL values from color
+          const colorMatch = enhancedBall.color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+          let hue = 0, saturation = 70, lightness = 80;
           
-          // Draw glow effect if enabled
-          if (effectsEnabled) {
-          // Extract HSL values from color
-            const colorMatch = enhancedBall.color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
-            let hue = 0, saturation = 70, lightness = 80;
-            
-            if (colorMatch && colorMatch.length >= 4) {
-              hue = parseInt(colorMatch[1]);
-              saturation = parseInt(colorMatch[2]);
-              lightness = parseInt(colorMatch[3]);
-            }
+          if (colorMatch && colorMatch.length >= 4) {
+            hue = parseInt(colorMatch[1]);
+            saturation = parseInt(colorMatch[2]);
+            lightness = parseInt(colorMatch[3]);
+          }
+        
+        // Create gradient for glow effect
+        const glowSize = enhancedBall.glowSize || 1.5;
+        const glowOpacity = enhancedBall.glowOpacity || 0.7;
+        
+        const gradient = ctx.createRadialGradient(
+          enhancedBall.position.x, enhancedBall.position.y, 0,
+          enhancedBall.position.x, enhancedBall.position.y, enhancedBall.radius * glowSize
+        );
           
-          // Create gradient for glow effect
-          const glowSize = enhancedBall.glowSize || 1.5;
-          const glowOpacity = enhancedBall.glowOpacity || 0.7;
+          gradient.addColorStop(0, `hsla(${hue}, ${saturation}%, ${Math.min(lightness + 15, 100)}%, ${glowOpacity + 0.1})`);
+          gradient.addColorStop(0.5, `hsla(${hue}, ${saturation}%, ${lightness}%, ${glowOpacity})`);
+          gradient.addColorStop(1, `hsla(${hue}, ${saturation}%, ${lightness}%, 0)`);
           
-          const gradient = ctx.createRadialGradient(
-            enhancedBall.position.x, enhancedBall.position.y, 0,
-            enhancedBall.position.x, enhancedBall.position.y, enhancedBall.radius * glowSize
+          ctx.beginPath();
+          ctx.arc(
+            enhancedBall.position.x,
+            enhancedBall.position.y,
+            enhancedBall.radius * glowSize,
+            0,
+            Math.PI * 2
           );
-            
-            gradient.addColorStop(0, `hsla(${hue}, ${saturation}%, ${Math.min(lightness + 15, 100)}%, ${glowOpacity + 0.1})`);
-            gradient.addColorStop(0.5, `hsla(${hue}, ${saturation}%, ${lightness}%, ${glowOpacity})`);
-            gradient.addColorStop(1, `hsla(${hue}, ${saturation}%, ${lightness}%, 0)`);
-            
+          ctx.fillStyle = gradient;
+          ctx.fill();
+        }
+        
+      // Si l'effet de trainée est activé, dessiner une petite trainée derrière la balle
+      if (TRAIL_EFFECT && enhancedBall.velocity) {
+        const speed = Math.sqrt(
+          enhancedBall.velocity.x * enhancedBall.velocity.x + 
+          enhancedBall.velocity.y * enhancedBall.velocity.y
+        );
+        
+        // Calculer la longueur de la trainée en fonction de la vitesse
+        const trailLength = Math.min(speed * 3, 60); // Trainée plus longue pour mieux visualiser
+        
+        // Calculer la direction inverse de la vitesse pour dessiner la trainée
+        const vNorm = Math.sqrt(
+          enhancedBall.velocity.x * enhancedBall.velocity.x + 
+          enhancedBall.velocity.y * enhancedBall.velocity.y
+        );
+        
+        if (vNorm > 0.1) {  // Éviter division par zéro
+          const vxNorm = -enhancedBall.velocity.x / vNorm;
+          const vyNorm = -enhancedBall.velocity.y / vNorm;
+          
+          // Dessiner la trainée
+          ctx.beginPath();
+          ctx.moveTo(enhancedBall.position.x, enhancedBall.position.y);
+          ctx.lineTo(
+            enhancedBall.position.x + vxNorm * trailLength,
+            enhancedBall.position.y + vyNorm * trailLength
+          );
+          
+          // Créer un dégradé pour la trainée
+          const gradient = ctx.createLinearGradient(
+            enhancedBall.position.x, enhancedBall.position.y,
+            enhancedBall.position.x + vxNorm * trailLength,
+            enhancedBall.position.y + vyNorm * trailLength
+          );
+          
+          // Rendre la trainée plus visible
+          let color = enhancedBall.color;
+          if (color.startsWith('hsl')) {
+            gradient.addColorStop(0, color.replace(')', ', 0.9)').replace('hsl', 'hsla'));
+            gradient.addColorStop(1, color.replace(')', ', 0)').replace('hsl', 'hsla'));
+          } else {
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          }
+          
+          ctx.strokeStyle = gradient;
+          ctx.lineWidth = enhancedBall.radius * 0.6; // Légèrement plus fine
+          ctx.lineCap = 'round';
+          ctx.stroke();
+        }
+      }
+        
+      // Dessiner la balle
+      const pulseEffect = enhancedBall.pulseEffect || 0;
+        const pulseScale = effectsEnabled ? (1 + (pulseEffect * 0.2)) : 1;
+      
+        ctx.save();
+        
+        ctx.beginPath();
+        ctx.arc(
+          enhancedBall.position.x,
+          enhancedBall.position.y,
+          enhancedBall.radius * pulseScale,
+          0,
+          Math.PI * 2
+        );
+        
+        if (effectsEnabled) {
+          ctx.shadowColor = enhancedBall.color;
+          ctx.shadowBlur = 20 * pulseEffect;
+        }
+        
+        if (useCustomImages && enhancedBall.image) {
+          ctx.clip();
+          const imgSize = enhancedBall.radius * 2 * pulseScale;
+      
+        // Activer l'interpolation pour une meilleure qualité d'image
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+      
+          ctx.drawImage(
+            enhancedBall.image, 
+            enhancedBall.position.x - imgSize/2, 
+            enhancedBall.position.y - imgSize/2, 
+            imgSize, 
+            imgSize
+          );
+          ctx.globalCompositeOperation = 'source-over';
+        } else {
+          ctx.fillStyle = enhancedBall.color;
+          ctx.fill();
+          
+          if (effectsEnabled) {
+            ctx.globalCompositeOperation = 'overlay';
             ctx.beginPath();
             ctx.arc(
-              enhancedBall.position.x,
-              enhancedBall.position.y,
-              enhancedBall.radius * glowSize,
+              enhancedBall.position.x - enhancedBall.radius * 0.3,
+              enhancedBall.position.y - enhancedBall.radius * 0.3,
+              enhancedBall.radius * 0.5,
               0,
               Math.PI * 2
             );
-            ctx.fillStyle = gradient;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
             ctx.fill();
-          }
-          
-        // Si l'effet de trainée est activé, dessiner une petite trainée derrière la balle
-        if (TRAIL_EFFECT && enhancedBall.velocity) {
-          const speed = Math.sqrt(
-            enhancedBall.velocity.x * enhancedBall.velocity.x + 
-            enhancedBall.velocity.y * enhancedBall.velocity.y
-          );
-          
-          // Calculer la longueur de la trainée en fonction de la vitesse
-          const trailLength = Math.min(speed * 3, 60); // Trainée plus longue pour mieux visualiser
-          
-          // Calculer la direction inverse de la vitesse pour dessiner la trainée
-          const vNorm = Math.sqrt(
-            enhancedBall.velocity.x * enhancedBall.velocity.x + 
-            enhancedBall.velocity.y * enhancedBall.velocity.y
-          );
-          
-          if (vNorm > 0.1) {  // Éviter division par zéro
-            const vxNorm = -enhancedBall.velocity.x / vNorm;
-            const vyNorm = -enhancedBall.velocity.y / vNorm;
-            
-            // Dessiner la trainée
-            ctx.beginPath();
-            ctx.moveTo(enhancedBall.position.x, enhancedBall.position.y);
-            ctx.lineTo(
-              enhancedBall.position.x + vxNorm * trailLength,
-              enhancedBall.position.y + vyNorm * trailLength
-            );
-            
-            // Créer un dégradé pour la trainée
-            const gradient = ctx.createLinearGradient(
-              enhancedBall.position.x, enhancedBall.position.y,
-              enhancedBall.position.x + vxNorm * trailLength,
-              enhancedBall.position.y + vyNorm * trailLength
-            );
-            
-            // Rendre la trainée plus visible
-            let color = enhancedBall.color;
-            if (color.startsWith('hsl')) {
-              gradient.addColorStop(0, color.replace(')', ', 0.9)').replace('hsl', 'hsla'));
-              gradient.addColorStop(1, color.replace(')', ', 0)').replace('hsl', 'hsla'));
-            } else {
-              gradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
-              gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-            }
-            
-            ctx.strokeStyle = gradient;
-            ctx.lineWidth = enhancedBall.radius * 0.6; // Légèrement plus fine
-            ctx.lineCap = 'round';
-            ctx.stroke();
+            ctx.globalCompositeOperation = 'source-over';
           }
         }
-          
-        // Dessiner la balle
-        const pulseEffect = enhancedBall.pulseEffect || 0;
-          const pulseScale = effectsEnabled ? (1 + (pulseEffect * 0.2)) : 1;
         
-          ctx.save();
-          
-          ctx.beginPath();
-          ctx.arc(
-            enhancedBall.position.x,
-            enhancedBall.position.y,
-            enhancedBall.radius * pulseScale,
-            0,
-            Math.PI * 2
-          );
-          
-          if (effectsEnabled) {
-            ctx.shadowColor = enhancedBall.color;
-            ctx.shadowBlur = 20 * pulseEffect;
-          }
-          
-          if (useCustomImages && enhancedBall.image) {
-            ctx.clip();
-            const imgSize = enhancedBall.radius * 2 * pulseScale;
+      // Dessiner le contour avec une qualité améliorée
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+        ctx.strokeStyle = effectsEnabled ? 
+          `rgba(255, 255, 255, ${0.8 + pulseEffect * 0.2})` : 
+          'rgba(255, 255, 255, 0.5)';
+        ctx.lineWidth = effectsEnabled ? 2 : 1;
+        ctx.beginPath();
+        ctx.arc(
+          enhancedBall.position.x,
+          enhancedBall.position.y,
+          enhancedBall.radius,
+          0,
+          Math.PI * 2
+        );
+        ctx.stroke();
         
-          // Activer l'interpolation pour une meilleure qualité d'image
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-        
-            ctx.drawImage(
-              enhancedBall.image, 
-              enhancedBall.position.x - imgSize/2, 
-              enhancedBall.position.y - imgSize/2, 
-              imgSize, 
-              imgSize
-            );
-            ctx.globalCompositeOperation = 'source-over';
-          } else {
-            ctx.fillStyle = enhancedBall.color;
-            ctx.fill();
-            
-            if (effectsEnabled) {
-              ctx.globalCompositeOperation = 'overlay';
-              ctx.beginPath();
-              ctx.arc(
-                enhancedBall.position.x - enhancedBall.radius * 0.3,
-                enhancedBall.position.y - enhancedBall.radius * 0.3,
-                enhancedBall.radius * 0.5,
-                0,
-                Math.PI * 2
-              );
-              ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-              ctx.fill();
-              ctx.globalCompositeOperation = 'source-over';
-            }
-          }
-          
-        // Dessiner le contour avec une qualité améliorée
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-          ctx.strokeStyle = effectsEnabled ? 
-            `rgba(255, 255, 255, ${0.8 + pulseEffect * 0.2})` : 
-            'rgba(255, 255, 255, 0.5)';
-          ctx.lineWidth = effectsEnabled ? 2 : 1;
-          ctx.beginPath();
-          ctx.arc(
-            enhancedBall.position.x,
-            enhancedBall.position.y,
-            enhancedBall.radius,
-            0,
-            Math.PI * 2
-          );
-          ctx.stroke();
-          
-        // Dessiner le score avec une meilleure qualité de texte
-          if (scoreTrackingEnabled && enhancedBall.score) {
-          // Calculer la taille de police optimale basée sur le rayon
-          const fontSize = Math.max(14, Math.min(enhancedBall.radius/2, 24));
-        
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-          ctx.font = `bold ${fontSize}px Arial, sans-serif`;
-        
-          // Ajouter un contour noir pour améliorer la lisibilité
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
-          ctx.lineWidth = 3;
-          ctx.strokeText(
+      // Dessiner le score avec une meilleure qualité de texte
+        if (scoreTrackingEnabled && enhancedBall.score) {
+        // Calculer la taille de police optimale basée sur le rayon
+        const fontSize = Math.max(14, Math.min(enhancedBall.radius/2, 24));
+      
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+        ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+      
+        // Ajouter un contour noir pour améliorer la lisibilité
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.lineWidth = 3;
+        ctx.strokeText(
+          enhancedBall.score.toString(), 
+          enhancedBall.position.x, 
+          enhancedBall.position.y
+        );
+      
+          ctx.fillStyle = 'white';
+          ctx.fillText(
             enhancedBall.score.toString(), 
             enhancedBall.position.x, 
             enhancedBall.position.y
           );
-        
-            ctx.fillStyle = 'white';
-            ctx.fillText(
-              enhancedBall.score.toString(), 
-              enhancedBall.position.x, 
-              enhancedBall.position.y
-            );
-          }
-          
-          ctx.restore();
-        });
-        
-      // Continuer l'animation si le jeu n'est pas terminé
-        if (!gameState.gameOver) {
-          requestRef.current = requestAnimationFrame(animate);
         }
-      };
-      
-    // Démarrer l'animation
-      requestRef.current = requestAnimationFrame(animate);
-      
-    // Nettoyer lors du démontage
-      return () => {
-        if (requestRef.current) {
-          cancelAnimationFrame(requestRef.current);
-          requestRef.current = undefined;
-        }
-      };
-    }, [
-    gameState, 
-    isPlaying, 
-    ballSpeed, 
-    effectsEnabled, 
-    ballCollisionsEnabled, 
-    scoreTrackingEnabled, 
-    bgEffectsEnabled, 
-    useCustomImages, 
-    useCustomSounds, 
-    loadedSounds, 
-    playBallSpecificSound,
-    musicEnabled, 
-    ballMusicAssignments, 
-    progressiveSoundEnabled, 
-    onBallCollision, 
-    extractedMusicEnabled,
-    gravity, 
-    growthRate, 
-    bounciness, 
-    standardSoundsEnabled,
-    bounceVolume,
-    backgroundColor,
-    circleColor,
-    circleAnimationEnabled,
-    circleAnimationDuration,
-    circleAnimationActive,
-    circleAnimationScale,
-    configSettings
-    ]);
-  
-  // Setup canvas dimensions
-  useEffect(() => {
-    if (!canvasRef.current) return;
-    
-    const handleResize = () => {
-      if (!canvasRef.current) return;
-      const canvas = canvasRef.current;
-      
-      // Obtenir les dimensions du conteneur parent
-      const container = canvas.parentElement;
-      if (!container) return;
-      
-      // Pour TikTok, nous voulons un ratio 9:16 (portrait)
-      const tiktokRatio = 9/16;
-      
-      // Calculer la taille maximale disponible
-      const maxWidth = container.clientWidth;
-      const maxHeight = window.innerHeight * 0.8; // Utiliser 80% de la hauteur de la fenêtre
-      
-      let containerWidth, containerHeight;
-      
-      // Déterminer si nous sommes limités par la largeur ou la hauteur
-      if (maxWidth / maxHeight > tiktokRatio) {
-        // Limité par la hauteur, ajuster la largeur
-        containerHeight = maxHeight;
-        containerWidth = maxHeight * tiktokRatio;
-      } else {
-        // Limité par la largeur, ajuster la hauteur
-        containerWidth = maxWidth;
-        containerHeight = maxWidth / tiktokRatio;
-      }
-      
-      // Appliquer un facteur de pixel ratio pour les écrans haute densité
-      const pixelRatio = window.devicePixelRatio || 1;
-      
-      // Définir la taille du canvas en tenant compte du pixel ratio pour une meilleure netteté
-      canvas.width = containerWidth * pixelRatio;
-      canvas.height = containerHeight * pixelRatio;
-      
-      // Maintenir la taille d'affichage (CSS)
-      canvas.style.width = `${containerWidth}px`;
-      canvas.style.height = `${containerHeight}px`;
-      
-      // Appliquer l'échelle au contexte pour compenser le pixel ratio
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.scale(pixelRatio, pixelRatio);
         
-        // Utiliser des fonctions pour améliorer la netteté du texte
-        ctx.textBaseline = 'middle';
-        ctx.textAlign = 'center';
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-      }
+        ctx.restore();
+      });
       
-      console.log(`Canvas resized to TikTok format: ${containerWidth}x${containerHeight} (ratio: ${containerWidth/containerHeight})`);
+    // Continuer l'animation si le jeu n'est pas terminé
+      if (!gameState.gameOver) {
+        requestRef.current = requestAnimationFrame(animate);
+      }
     };
     
-    // Appliquer le redimensionnement immédiatement
-    handleResize();
+  // Démarrer l'animation
+    requestRef.current = requestAnimationFrame(animate);
     
-    // Écouter les changements de taille de fenêtre
-    window.addEventListener('resize', handleResize);
-    
-    // Nettoyer l'écouteur d'événement lors du démontage
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
-
-  // Cleanup on unmount
-  useEffect(() => {
+  // Nettoyer lors du démontage
     return () => {
       if (requestRef.current) {
         cancelAnimationFrame(requestRef.current);
         requestRef.current = undefined;
       }
     };
-  }, []);
+  }, [
+  gameState, 
+  isPlaying, 
+  ballSpeed, 
+  effectsEnabled, 
+  ballCollisionsEnabled, 
+  scoreTrackingEnabled, 
+  bgEffectsEnabled, 
+  useCustomImages, 
+  useCustomSounds, 
+  loadedSounds, 
+  playBallSpecificSound,
+  musicEnabled, 
+  ballMusicAssignments, 
+  progressiveSoundEnabled, 
+  onBallCollision, 
+  extractedMusicEnabled,
+  gravity, 
+  growthRate, 
+  bounciness, 
+  standardSoundsEnabled,
+  bounceVolume,
+  backgroundColor,
+  circleColor,
+  circleAnimationEnabled,
+  circleAnimationDuration,
+  circleAnimationActive,
+  circleAnimationScale,
+  configSettings
+  ]);
 
-  // Handle mouse events
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isPlaying || !canvasRef.current) return;
-    
+// Setup canvas dimensions
+useEffect(() => {
+  if (!canvasRef.current) return;
+  
+  const handleResize = () => {
+    if (!canvasRef.current) return;
     const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
     
-    // Find the closest ball to start growing
-    let closestBall: EnhancedBall | null = null;
-    let closestDistance = Infinity;
+    // Obtenir les dimensions du conteneur parent
+    const container = canvas.parentElement;
+    if (!container) return;
     
-    for (const ball of gameState.balls) {
-      const dx = ball.position.x - mouseX;
-      const dy = ball.position.y - mouseY;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      if (distance < closestDistance) {
-        closestDistance = distance;
-        closestBall = ball;
-      }
-    }
+    // Pour TikTok, nous voulons un ratio 9:16 (portrait)
+    const tiktokRatio = 9/16;
     
-    // Start growing the closest ball
-    if (closestBall) {
-      closestBall.growing = true;
-    }
-  };
-
-  const handleMouseUp = () => {
-    // Stop growing all balls
-    for (const ball of gameState.balls) {
-      const enhancedBall = ball as EnhancedBall;
-      enhancedBall.growing = false;
-    }
-  };
-
-  // Toggle recording with audio capture
-  const toggleRecording = () => {
-    // Ensure audio context is resumed before recording
-    const context = getSoundAudioContext();
-    if (context && context.state === 'suspended') {
-      console.log('Resuming audio context before recording');
-      context.resume().then(() => {
-        console.log('Audio context resumed for recording');
-        // Only start/stop recording after context is definitely resumed
-        handleRecordingToggle();
-      }).catch(err => {
-        console.error('Failed to resume audio context:', err);
-        // Try to continue anyway
-        handleRecordingToggle();
-      });
+    // Calculer la taille maximale disponible
+    const maxWidth = container.clientWidth;
+    const maxHeight = window.innerHeight * 0.8; // Utiliser 80% de la hauteur de la fenêtre
+    
+    let containerWidth, containerHeight;
+    
+    // Déterminer si nous sommes limités par la largeur ou la hauteur
+    if (maxWidth / maxHeight > tiktokRatio) {
+      // Limité par la hauteur, ajuster la largeur
+      containerHeight = maxHeight;
+      containerWidth = maxHeight * tiktokRatio;
     } else {
-      handleRecordingToggle();
+      // Limité par la largeur, ajuster la hauteur
+      containerWidth = maxWidth;
+      containerHeight = maxWidth / tiktokRatio;
     }
-  };
-
-  // Actual recording toggle implementation
-  const handleRecordingToggle = () => {
-    if (isRecording) {
-      console.log('Stopping recording...');
-      stopRecording().then(blob => {
-        if (blob) {
-          console.log('Recording stopped successfully, blob size:', blob.size);
-        } else {
-          console.error('Recording stopped but no blob was created');
-        }
-      }).catch(err => {
-        console.error('Error stopping recording:', err);
-      });
-    } else {
-      if (canvasRef.current) {
-        console.log('Starting recording with audio capture...');
-        
-        // Make sure all audio systems are properly connected before recording
-        const destination = getAudioDestination();
-        if (destination) {
-          connectToRecorder(destination);
-          console.log('Reconnected audio system to recorder');
-        }
-        
-        // Use more stable settings for better compatibility
-        startRecording(canvasRef.current, 60000, {
-          frameRate: 30, // Lower to 30fps for stability
-          videoBitsPerSecond: 3000000, // 3 Mbps for better compatibility
-          captureAudio: true // Enable audio capture
-        }).catch(err => {
-          console.error('Failed to start recording:', err);
-          alert('Recording failed to start. Please try again.');
-        });
-      }
-    }
-  };
-
-  const handleDownloadVideo = () => {
-    downloadGameplayVideo(`tiktok-game-${new Date().getTime()}.webm`);
-  };
-
-  // Fonction pour créer un effet visuel sur le canvas lors des collisions
-  const performCanvasEffect = (canvas: HTMLCanvasElement) => {
-    if (!canvas) return;
     
+    // Appliquer un facteur de pixel ratio pour les écrans haute densité
+    const pixelRatio = window.devicePixelRatio || 1;
+    
+    // Définir la taille du canvas en tenant compte du pixel ratio pour une meilleure netteté
+    canvas.width = containerWidth * pixelRatio;
+    canvas.height = containerHeight * pixelRatio;
+    
+    // Maintenir la taille d'affichage (CSS)
+    canvas.style.width = `${containerWidth}px`;
+    canvas.style.height = `${containerHeight}px`;
+    
+    // Appliquer l'échelle au contexte pour compenser le pixel ratio
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (ctx) {
+      ctx.scale(pixelRatio, pixelRatio);
+      
+      // Utiliser des fonctions pour améliorer la netteté du texte
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+    }
     
-    // Sauvegarder l'état actuel du contexte
-    ctx.save();
-    
-    // Appliquer un effet de flash
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Restaurer l'état du contexte
-    ctx.restore();
-    
-    // Effacer l'effet après un court délai
-    setTimeout(() => {
-      if (!canvasRef.current) return;
-      const gameLoop = () => {}; // Dummy function to make TypeScript happy
-      gameLoop(); // Force redraw
-    }, 50);
+    console.log(`Canvas resized to TikTok format: ${containerWidth}x${containerHeight} (ratio: ${containerWidth/containerHeight})`);
   };
+  
+  // Appliquer le redimensionnement immédiatement
+  handleResize();
+  
+  // Écouter les changements de taille de fenêtre
+  window.addEventListener('resize', handleResize);
+  
+  // Nettoyer l'écouteur d'événement lors du démontage
+  return () => {
+    window.removeEventListener('resize', handleResize);
+  };
+}, []);
 
-  // Améliorer le traitement des collisions pour maintenir la vitesse constante
-  const handleCollision = (
-    ball: EnhancedBall,
-    newPosition: { x: number, y: number },
-    newVx: number,
-    newVy: number,
-    centerX: number,
-    centerY: number,
-    circleRadius: number,
-    timestamp: number
-  ) => {
-    console.log(`[COLLISION] Collision avec cercle, radius avant: ${ball.radius.toFixed(2)}, midiEnabled: ${midiEnabled}`);
-    
-    // Trigger circle animation if enabled
-    if (circleAnimationEnabled && configSettings.circleAnimationEnabled) {
-      setCircleAnimationActive(true);
-      setCircleAnimationScale(1.05); // Start with a slight scale up
-      
-      // Clear any existing animation
-      if (circleAnimationRef.current) {
-        cancelAnimationFrame(circleAnimationRef.current);
-      }
-      
-      // Animate the circle
-      let startTime = performance.now();
-      const animateCircle = (time: number) => {
-        const elapsed = time - startTime;
-        const progress = Math.min(1, elapsed / configSettings.circleAnimationDuration);
-        
-        // Ease out effect
-        const scale = 1 + (0.05 * (1 - progress));
-        setCircleAnimationScale(scale);
-        
-        if (progress < 1) {
-          circleAnimationRef.current = requestAnimationFrame(animateCircle);
-        } else {
-          setCircleAnimationActive(false);
-          setCircleAnimationScale(1);
-          circleAnimationRef.current = null;
-        }
-      };
-      
-      circleAnimationRef.current = requestAnimationFrame(animateCircle);
+// Cleanup on unmount
+useEffect(() => {
+  return () => {
+    if (requestRef.current) {
+      cancelAnimationFrame(requestRef.current);
+      requestRef.current = undefined;
     }
-    
-    // Stocker la vitesse avant collision pour la maintenir après
-    const speedBeforeCollision = Math.sqrt(newVx * newVx + newVy * newVy);
-    const initialSpeed = ball.initialSpeed || speedBeforeCollision;
-    
-    // Jouer une note MIDI au début de la collision si c'est activé ET qu'une séquence MIDI est disponible
-    if (midiEnabled && typeof playMIDINote === 'function' && hasMIDISequence()) {
-      try {
-        // Calculer la vitesse d'impact
-        const speed = Math.sqrt(newVx * newVx + newVy * newVy);
-        // Calculer un volume entre 0.4 et 1 en fonction de la vitesse
-        const volume = 0.4 + Math.min(0.6, speed / 20);
-        
-        console.log(`[COLLISION] Tentative de jouer un son MIDI volume=${volume}`);
-        playMIDINote(volume);
-      } catch (e) {
-        console.error("[COLLISION] Erreur lecture MIDI:", e);
-      }
-    }
-    
-    // *** IMPORTANT *** AUGMENTER LA TAILLE DE LA BALLE À CHAQUE REBOND
-    // Limiter la taille presque jusqu'à la taille du cercle pour éviter les chevauchements
-    const maxBallRadius = circleRadius * MAX_BALL_RADIUS_FACTOR;
-    const growthFactor = growthRate * 0.5; // Facteur de croissance plus petit
-    const newRadius = Math.min(ball.radius + growthFactor, maxBallRadius);
-    
-    console.log(`[COLLISION] Augmentation du rayon: ${ball.radius.toFixed(2)} -> ${newRadius.toFixed(2)}, facteur: ${growthFactor.toFixed(2)}, max: ${maxBallRadius.toFixed(2)}`);
-    
-    // Mettre à jour le rayon de la balle
-    ball.radius = newRadius;
-    
-    // Calculer la direction normale et l'angle d'incidence
-    const dx = newPosition.x - centerX;
-    const dy = newPosition.y - centerY;
+  };
+}, []);
+
+// Handle mouse events
+const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  if (!isPlaying || !canvasRef.current) return;
+  
+  const canvas = canvasRef.current;
+  const rect = canvas.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const mouseY = e.clientY - rect.top;
+  
+  // Find the closest ball to start growing
+  let closestBall: EnhancedBall | null = null;
+  let closestDistance = Infinity;
+  
+  for (const ball of gameState.balls) {
+    const dx = ball.position.x - mouseX;
+    const dy = ball.position.y - mouseY;
     const distance = Math.sqrt(dx * dx + dy * dy);
     
-    // Normaliser le vecteur de direction
-    const nx = dx / distance;
-    const ny = dy / distance;
-    
-    // Calculer la projection du vecteur vitesse sur la normale
-    const dotProduct = newVx * nx + newVy * ny;
-    
-    // Calculer l'impulsion (changement de vitesse)
-    const impactSpeed = Math.abs(dotProduct);
-    
-    // Calculer la nouvelle vitesse en fonction de l'élasticité
-    const elasticity = ball.elasticity || bounciness;
-    
-    // Réfléchir la composante normale de la vitesse et conserver l'énergie
-    const reflectionX = nx * dotProduct * (1 + elasticity);
-    const reflectionY = ny * dotProduct * (1 + elasticity);
-    
-    // Appliquer le rebond
-    newVx -= reflectionX;
-    newVy -= reflectionY;
-    
-    // Repositionner la balle exactement à la limite du cercle pour éviter les téléportations
-    if (SMOOTH_COLLISIONS) {
-      const newDistance = circleRadius - ball.radius;
-      newPosition.x = centerX + nx * newDistance;
-      newPosition.y = centerY + ny * newDistance;
-    } else {
-      // Repositionner la balle à la limite du cercle pour éviter la pénétration
-      const overlapDistance = (ball.radius + circleRadius - distance) - WALL_PADDING;
-      newPosition.x -= nx * overlapDistance * 1.01; // Petit décalage supplémentaire
-      newPosition.y -= ny * overlapDistance * 1.01;
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestBall = ball;
     }
-    
-    // Jouer un son pour la collision
-    if (standardSoundsEnabled) {
-      playBounceSound(Math.min(impactSpeed / 20, 1));
-    }
-    
-    // IMPORTANT: Maintenir une vitesse constante après la collision
-    if (MAINTAIN_CONSTANT_SPEED && ball.initialSpeed && ball.initialSpeed > 0) {
-      const speedAfterCollision = Math.sqrt(ball.velocity.x * ball.velocity.x + ball.velocity.y * ball.velocity.y);
-      if (speedAfterCollision > 0 && Math.abs(speedAfterCollision - ball.initialSpeed) > 0.01) {
-        const correctionFactor = ball.initialSpeed / speedAfterCollision;
-        ball.velocity.x *= correctionFactor;
-        ball.velocity.y *= correctionFactor;
+  }
+  
+  // Start growing the closest ball
+  if (closestBall) {
+    closestBall.growing = true;
+  }
+};
+
+const handleMouseUp = () => {
+  // Stop growing all balls
+  for (const ball of gameState.balls) {
+    const enhancedBall = ball as EnhancedBall;
+    enhancedBall.growing = false;
+  }
+};
+
+// Toggle recording with audio capture
+const toggleRecording = () => {
+  // Ensure audio context is resumed before recording
+  const context = getSoundAudioContext();
+  if (context && context.state === 'suspended') {
+    console.log('Resuming audio context before recording');
+    context.resume().then(() => {
+      console.log('Audio context resumed for recording');
+      // Only start/stop recording after context is definitely resumed
+      handleRecordingToggle();
+    }).catch(err => {
+      console.error('Failed to resume audio context:', err);
+      // Try to continue anyway
+      handleRecordingToggle();
+    });
+  } else {
+    handleRecordingToggle();
+  }
+};
+
+// Actual recording toggle implementation
+const handleRecordingToggle = () => {
+  if (isRecording) {
+    console.log('Stopping recording...');
+    stopRecording().then(blob => {
+      if (blob) {
+        console.log('Recording stopped successfully, blob size:', blob.size);
+      } else {
+        console.error('Recording stopped but no blob was created');
       }
+    }).catch(err => {
+      console.error('Error stopping recording:', err);
+    });
+  } else {
+    if (canvasRef.current) {
+      console.log('Starting recording with audio capture...');
+      
+      // Make sure all audio systems are properly connected before recording
+      const destination = getAudioDestination();
+      if (destination) {
+        connectToRecorder(destination);
+        console.log('Reconnected audio system to recorder');
+      }
+      
+      // Use more stable settings for better compatibility
+      startRecording(canvasRef.current, 60000, {
+        frameRate: 30, // Lower to 30fps for stability
+        videoBitsPerSecond: 3000000, // 3 Mbps for better compatibility
+        captureAudio: true // Enable audio capture
+      }).catch(err => {
+        console.error('Failed to start recording:', err);
+        alert('Recording failed to start. Please try again.');
+      });
+    }
+  }
+};
+
+const handleDownloadVideo = () => {
+  downloadGameplayVideo(`tiktok-game-${new Date().getTime()}.webm`);
+};
+
+// Fonction pour créer un effet visuel sur le canvas lors des collisions
+const performCanvasEffect = (canvas: HTMLCanvasElement) => {
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  
+  // Sauvegarder l'état actuel du contexte
+  ctx.save();
+  
+  // Appliquer un effet de flash
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // Restaurer l'état du contexte
+  ctx.restore();
+  
+  // Effacer l'effet après un court délai
+  setTimeout(() => {
+    if (!canvasRef.current) return;
+    const gameLoop = () => {}; // Dummy function to make TypeScript happy
+    gameLoop(); // Force redraw
+  }, 50);
+};
+
+// Améliorer le traitement des collisions pour maintenir la vitesse constante
+const handleCollision = (
+  ball: EnhancedBall,
+  newPosition: { x: number, y: number },
+  newVx: number,
+  newVy: number,
+  centerX: number,
+  centerY: number,
+  circleRadius: number,
+  timestamp: number
+) => {
+  console.log(`[COLLISION] Collision avec cercle, radius avant: ${ball.radius.toFixed(2)}, midiEnabled: ${midiEnabled}`);
+  
+  // Trigger circle animation if enabled
+  if (circleAnimationEnabled && configSettings.circleAnimationEnabled) {
+    setCircleAnimationActive(true);
+    setCircleAnimationScale(1.05); // Start with a slight scale up
+    
+    // Clear any existing animation
+    if (circleAnimationRef.current) {
+      cancelAnimationFrame(circleAnimationRef.current);
     }
     
-    // Mise à jour du temps de dernière collision
-    const lastCollisionTime = timestamp;
-    
-    console.log(`[COLLISION] Collision terminée, nouveau rayon: ${ball.radius.toFixed(2)}`);
-    
-    // Retourner les valeurs mises à jour
-    return {
-      position: newPosition,
-      velocity: { x: newVx, y: newVy },
-      lastCollisionTime
+    // Animate the circle
+    let startTime = performance.now();
+    const animateCircle = (time: number) => {
+      const elapsed = time - startTime;
+      const progress = Math.min(1, elapsed / configSettings.circleAnimationDuration);
+      
+      // Ease out effect
+      const scale = 1 + (0.05 * (1 - progress));
+      setCircleAnimationScale(scale);
+      
+      if (progress < 1) {
+        circleAnimationRef.current = requestAnimationFrame(animateCircle);
+      } else {
+        setCircleAnimationActive(false);
+        setCircleAnimationScale(1);
+        circleAnimationRef.current = null;
+      }
     };
+    
+    circleAnimationRef.current = requestAnimationFrame(animateCircle);
+  }
+  
+  // Stocker la vitesse avant collision pour la maintenir après
+  const speedBeforeCollision = Math.sqrt(newVx * newVx + newVy * newVy);
+  const initialSpeed = ball.initialSpeed || speedBeforeCollision;
+  
+  // Jouer une note MIDI au début de la collision si c'est activé ET qu'une séquence MIDI est disponible
+  if (midiEnabled && typeof playMIDINote === 'function' && hasMIDISequence()) {
+    try {
+      // Calculer la vitesse d'impact
+      const speed = Math.sqrt(newVx * newVx + newVy * newVy);
+      // Calculer un volume entre 0.4 et 1 en fonction de la vitesse
+      const volume = 0.4 + Math.min(0.6, speed / 20);
+      
+      console.log(`[COLLISION] Tentative de jouer un son MIDI volume=${volume}`);
+      playMIDINote(volume);
+    } catch (e) {
+      console.error("[COLLISION] Erreur lecture MIDI:", e);
+    }
+  }
+  
+  // *** IMPORTANT *** AUGMENTER LA TAILLE DE LA BALLE À CHAQUE REBOND
+  // Limiter la taille presque jusqu'à la taille du cercle pour éviter les chevauchements
+  const maxBallRadius = circleRadius * MAX_BALL_RADIUS_FACTOR;
+  const growthFactor = growthRate * 0.5; // Facteur de croissance plus petit
+  const newRadius = Math.min(ball.radius + growthFactor, maxBallRadius);
+  
+  console.log(`[COLLISION] Augmentation du rayon: ${ball.radius.toFixed(2)} -> ${newRadius.toFixed(2)}, facteur: ${growthFactor.toFixed(2)}, max: ${maxBallRadius.toFixed(2)}`);
+  
+  // Mettre à jour le rayon de la balle
+  ball.radius = newRadius;
+  
+  // Calculer la direction normale et l'angle d'incidence
+  const dx = newPosition.x - centerX;
+  const dy = newPosition.y - centerY;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  
+  // Normaliser le vecteur de direction
+  const nx = dx / distance;
+  const ny = dy / distance;
+  
+  // Calculer la projection du vecteur vitesse sur la normale
+  const dotProduct = newVx * nx + newVy * ny;
+  
+  // Calculer l'impulsion (changement de vitesse)
+  const impactSpeed = Math.abs(dotProduct);
+  
+  // Calculer la nouvelle vitesse en fonction de l'élasticité
+  const elasticity = ball.elasticity || bounciness;
+  
+  // Réfléchir la composante normale de la vitesse et conserver l'énergie
+  const reflectionX = nx * dotProduct * (1 + elasticity);
+  const reflectionY = ny * dotProduct * (1 + elasticity);
+  
+  // Appliquer le rebond
+  newVx -= reflectionX;
+  newVy -= reflectionY;
+  
+  // Repositionner la balle exactement à la limite du cercle pour éviter les téléportations
+  if (SMOOTH_COLLISIONS) {
+    const newDistance = circleRadius - ball.radius;
+    newPosition.x = centerX + nx * newDistance;
+    newPosition.y = centerY + ny * newDistance;
+  } else {
+    // Repositionner la balle à la limite du cercle pour éviter la pénétration
+    const overlapDistance = (ball.radius + circleRadius - distance) - WALL_PADDING;
+    newPosition.x -= nx * overlapDistance * 1.01; // Petit décalage supplémentaire
+    newPosition.y -= ny * overlapDistance * 1.01;
+  }
+  
+  // Jouer un son pour la collision
+  if (standardSoundsEnabled) {
+    playBounceSound(Math.min(impactSpeed / 20, 1));
+  }
+  
+  // IMPORTANT: Maintenir une vitesse constante après la collision
+  if (MAINTAIN_CONSTANT_SPEED && ball.initialSpeed && ball.initialSpeed > 0) {
+    const speedAfterCollision = Math.sqrt(ball.velocity.x * ball.velocity.x + ball.velocity.y * ball.velocity.y);
+    if (speedAfterCollision > 0 && Math.abs(speedAfterCollision - ball.initialSpeed) > 0.01) {
+      const correctionFactor = ball.initialSpeed / speedAfterCollision;
+      ball.velocity.x *= correctionFactor;
+      ball.velocity.y *= correctionFactor;
+    }
+  }
+  
+  // Mise à jour du temps de dernière collision
+  const lastCollisionTime = timestamp;
+  
+  console.log(`[COLLISION] Collision terminée, nouveau rayon: ${ball.radius.toFixed(2)}`);
+  
+  // Retourner les valeurs mises à jour
+  return {
+    position: newPosition,
+    velocity: { x: newVx, y: newVy },
+    lastCollisionTime
   };
+};
 
-  // Améliorer la gestion des collisions avec les murs
-  const handleWallCollision = (
-    ball: EnhancedBall,
-    canvasWidth: number,
-    canvasHeight: number,
-    bounceVolume: number // This is the game-wide bounceVolume prop
-  ) => {
-    const currentTime = performance.now();
-    
-    // DEBUG: Afficher les informations détaillées à chaque appel
-    console.log(`[DEBUG COLLISION] handleWallCollision called with ball id=${ball.id}, radius=${ball.radius.toFixed(2)}, position=(${ball.position.x.toFixed(2)}, ${ball.position.y.toFixed(2)})`);
-    console.log(`[DEBUG COLLISION] ball velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)}), currentTime=${currentTime}`);
-    console.log(`[DEBUG COLLISION] lastWallCollisionTime=${ball.lastWallCollisionTime || 'undefined'}, immunity time=${WALL_IMMUNITY_TIME}ms`);
-    
-    // DEBUG: Afficher l'état actuel des sons personnalisés
-    console.log('[DEBUG SOUND] useCustomSounds:', useCustomSounds);
-    console.log('[DEBUG SOUND] hasCustomSound("wall"):', hasCustomSound('wall'));
-    console.log('[DEBUG SOUND] standardSoundsEnabled:', standardSoundsEnabled);
-    
-    // Vérifier si nous devons mettre à jour la physique, mais toujours jouer les sons
-    let shouldUpdatePhysics = true;
-    if (ball.lastWallCollisionTime && currentTime - ball.lastWallCollisionTime < WALL_IMMUNITY_TIME) {
-      shouldUpdatePhysics = false;
-      console.log(`[DEBUG COLLISION] Collision physics immunity active for ${Math.round(WALL_IMMUNITY_TIME - (currentTime - ball.lastWallCollisionTime))}ms more`);
-    }
+// Améliorer la gestion des collisions avec les murs
+const handleWallCollision = (
+  ball: EnhancedBall,
+  canvasWidth: number,
+  canvasHeight: number,
+  bounceVolume: number // This is the game-wide bounceVolume prop
+) => {
+  const currentTime = performance.now();
+  
+  // DEBUG: Afficher les informations détaillées à chaque appel
+  console.log(`[DEBUG COLLISION] handleWallCollision called with ball id=${ball.id}, radius=${ball.radius.toFixed(2)}, position=(${ball.position.x.toFixed(2)}, ${ball.position.y.toFixed(2)})`);
+  console.log(`[DEBUG COLLISION] ball velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)}), currentTime=${currentTime}`);
+  console.log(`[DEBUG COLLISION] lastWallCollisionTime=${ball.lastWallCollisionTime || 'undefined'}, immunity time=${WALL_IMMUNITY_TIME}ms`);
+  
+  // DEBUG: Afficher l'état actuel des sons personnalisés
+  console.log('[DEBUG SOUND] useCustomSounds:', useCustomSounds);
+  console.log('[DEBUG SOUND] hasCustomSound("wall"):', hasCustomSound('wall'));
+  console.log('[DEBUG SOUND] standardSoundsEnabled:', standardSoundsEnabled);
+  
+  // Vérifier si nous devons mettre à jour la physique, mais toujours jouer les sons
+  let shouldUpdatePhysics = true;
+  if (ball.lastWallCollisionTime && currentTime - ball.lastWallCollisionTime < WALL_IMMUNITY_TIME) {
+    shouldUpdatePhysics = false;
+    console.log(`[DEBUG COLLISION] Collision physics immunity active for ${Math.round(WALL_IMMUNITY_TIME - (currentTime - ball.lastWallCollisionTime))}ms more`);
+  }
 
-    // Use the component's bounciness prop, which defaults to DEFAULT_BOUNCINESS
-    const currentBounciness = bounciness;
+  // Use the component's bounciness prop, which defaults to DEFAULT_BOUNCINESS
+  const currentBounciness = bounciness;
 
-    let wall: "right" | "left" | "floor" | "ceiling" | null = null; // track which wall
-    const initialSpeed = Math.sqrt(ball.velocity.x * ball.velocity.x + ball.velocity.y * ball.velocity.y);
-    console.log(`[DEBUG COLLISION] Initial speed: ${initialSpeed.toFixed(2)}, currentBounciness: ${currentBounciness}`);
+  let wall: "right" | "left" | "floor" | "ceiling" | null = null; // track which wall
+  const initialSpeed = Math.sqrt(ball.velocity.x * ball.velocity.x + ball.velocity.y * ball.velocity.y);
+  console.log(`[DEBUG COLLISION] Initial speed: ${initialSpeed.toFixed(2)}, currentBounciness: ${currentBounciness}`);
 
-    const addRandomAngle = (vx: number, vy: number): {x: number, y: number} => {
-      if (!RANDOM_BOUNCE_ANGLE) return {x: vx, y: vy};
-      const angle = Math.atan2(vy, vx);
-      const randomVariation = (Math.random() * 2 - 1) * RANDOM_ANGLE_MAX;
-      const newAngle = angle + randomVariation;
-      const speed = Math.sqrt(vx * vx + vy * vy);
-      console.log(`[DEBUG COLLISION] Random angle applied: ${(randomVariation * 180 / Math.PI).toFixed(2)} degrees`);
-      return { x: Math.cos(newAngle) * speed, y: Math.sin(newAngle) * speed };
-    };
-    
-    let collided = false;
-    
-    // SAFETY_MARGIN ensures the ball is placed with enough clearance from the wall
-    const SAFETY_MARGIN = ball.radius * 0.1 + 2; // Increased from 0.05 to 0.1, and base value from 1 to 2
-
-    // Check for collision and reflect velocity
-    // Ensure position is corrected to prevent sticking
-    if (ball.position.x + ball.radius > canvasWidth - WALL_MARGIN) {
-      wall = "right";
-      console.log(`[DEBUG COLLISION] Right wall collision detected`);
-      
-      if (shouldUpdatePhysics) {
-        console.log(`[DEBUG COLLISION] Updating physics for right wall collision`);
-        // Corriger la position pour un contact exact avec le mur avec une marge de sécurité
-        ball.position.x = canvasWidth - ball.radius - WALL_MARGIN - SAFETY_MARGIN;
-        // Inverser la vélocité X avec un peu d'atténuation contrôlée par le bounciness
-        ball.velocity.x = -Math.abs(ball.velocity.x) * currentBounciness;
-        // Ensure minimum horizontal velocity away from wall
-        if (Math.abs(ball.velocity.x) < MIN_WALL_BOUNCE_VELOCITY) {
-          ball.velocity.x = -MIN_WALL_BOUNCE_VELOCITY;
-        }
-        // Appliquer une friction à la vélocité Y pour simuler une friction au mur
-        ball.velocity.y *= WALL_TANGENTIAL_FRICTION;
-        console.log(`[DEBUG COLLISION] After right wall: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
-      } else {
-        // Even during immunity, ensure ball is not inside wall
-        if (ball.position.x + ball.radius > canvasWidth - WALL_MARGIN) {
-          ball.position.x = canvasWidth - ball.radius - WALL_MARGIN - SAFETY_MARGIN;
-          
-          // Always ensure minimum velocity away from wall, even during immunity
-          if (ball.velocity.x >= -0.5) {
-            ball.velocity.x = -MIN_WALL_BOUNCE_VELOCITY;
-          }
-        }
-        console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
-      }
-      
-      collided = true;
-    } else if (ball.position.x - ball.radius < WALL_MARGIN) {
-      wall = "left";
-      console.log(`[DEBUG COLLISION] Left wall collision detected`);
-      
-      if (shouldUpdatePhysics) {
-        // Corriger la position pour un contact exact avec le mur avec une marge de sécurité
-        ball.position.x = ball.radius + WALL_MARGIN + SAFETY_MARGIN;
-        // Inverser la vélocité X avec un peu d'atténuation
-        ball.velocity.x = Math.abs(ball.velocity.x) * currentBounciness;
-        // Ensure minimum horizontal velocity away from wall
-        if (Math.abs(ball.velocity.x) < MIN_WALL_BOUNCE_VELOCITY) {
-          ball.velocity.x = MIN_WALL_BOUNCE_VELOCITY;
-        }
-        // Appliquer une friction à la vélocité Y
-        ball.velocity.y *= WALL_TANGENTIAL_FRICTION;
-        console.log(`[DEBUG COLLISION] After left wall: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
-      } else {
-        // Even during immunity, ensure ball is not inside wall
-        if (ball.position.x - ball.radius < WALL_MARGIN) {
-          ball.position.x = ball.radius + WALL_MARGIN + SAFETY_MARGIN;
-          
-          // Always ensure minimum velocity away from wall, even during immunity
-          if (ball.velocity.x <= 0.5) {
-            ball.velocity.x = MIN_WALL_BOUNCE_VELOCITY;
-          }
-        }
-        console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
-      }
-      
-      collided = true;
-    }
-
-    // Traitement spécial pour le sol - essentiel pour fixer le glitch
-    if (ball.position.y + ball.radius > canvasHeight - WALL_MARGIN) {
-      wall = "floor";
-      
-      if (shouldUpdatePhysics) {
-        // IMPORTANT: S'assurer que la balle est exactement sur le sol avec une marge de sécurité
-        ball.position.y = canvasHeight - ball.radius - WALL_MARGIN - SAFETY_MARGIN;
-        
-        // Force minimale pour éviter que la balle "colle" au sol
-        const minBounceVelocity = MIN_WALL_BOUNCE_VELOCITY; // Using the constant for consistency
-        
-        // Si la vitesse est trop faible, ajouter une impulsion minimale
-        if (Math.abs(ball.velocity.y) < minBounceVelocity) {
-          ball.velocity.y = -minBounceVelocity;
-        } else {
-          // Sinon, rebond normal avec atténuation contrôlée
-          ball.velocity.y = -Math.abs(ball.velocity.y) * currentBounciness;
-        }
-        
-        // Appliquer une friction horizontale plus importante au sol
-        ball.velocity.x *= DEFAULT_FRICTION;
-        console.log(`[DEBUG COLLISION] After floor: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
-      } else {
-        // Even during immunity, ensure ball is not inside floor
-        if (ball.position.y + ball.radius > canvasHeight - WALL_MARGIN) {
-          ball.position.y = canvasHeight - ball.radius - WALL_MARGIN - SAFETY_MARGIN;
-          
-          // Always ensure minimum velocity away from floor, even during immunity
-          if (ball.velocity.y >= -0.5) {
-            ball.velocity.y = -MIN_WALL_BOUNCE_VELOCITY;
-          }
-        }
-        console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
-      }
-      
-      collided = true;
-    } else if (ball.position.y - ball.radius < WALL_MARGIN) {
-      wall = "ceiling";
-      
-      if (shouldUpdatePhysics) {
-        // Corriger la position pour un contact exact avec le plafond avec une marge de sécurité
-        ball.position.y = ball.radius + WALL_MARGIN + SAFETY_MARGIN;
-        // Inverser la vélocité Y avec atténuation
-        ball.velocity.y = Math.abs(ball.velocity.y) * currentBounciness;
-        // Ensure minimum vertical velocity away from ceiling
-        if (Math.abs(ball.velocity.y) < MIN_WALL_BOUNCE_VELOCITY) {
-          ball.velocity.y = MIN_WALL_BOUNCE_VELOCITY;
-        }
-        // Appliquer une friction à la vélocité X
-        ball.velocity.x *= WALL_TANGENTIAL_FRICTION;
-        console.log(`[DEBUG COLLISION] After ceiling: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
-      } else {
-        // Even during immunity, ensure ball is not inside ceiling
-        if (ball.position.y - ball.radius < WALL_MARGIN) {
-          ball.position.y = ball.radius + WALL_MARGIN + SAFETY_MARGIN;
-          
-          // Always ensure minimum velocity away from ceiling, even during immunity
-          if (ball.velocity.y <= 0.5) {
-            ball.velocity.y = MIN_WALL_BOUNCE_VELOCITY;
-          }
-        }
-        console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
-      }
-      
-      collided = true;
-    }
-
-    if (collided && wall) {
-      // Mettre à jour le temps de collision uniquement si nous mettons à jour la physique
-      if (shouldUpdatePhysics) {
-        ball.lastWallCollisionTime = currentTime;
-        console.log(`[DEBUG COLLISION] Updated lastWallCollisionTime to ${currentTime}`);
-
-        const newV = addRandomAngle(ball.velocity.x, ball.velocity.y);
-        ball.velocity.x = newV.x;
-        ball.velocity.y = newV.y;
-        console.log(`[DEBUG COLLISION] After random angle: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
-        
-        // Grow the ball on collision
-        const maxBallRadius = (Math.min(canvasWidth, canvasHeight) / 2) * MAX_BALL_RADIUS_FACTOR;
-        const growthFactor = growthRate * 0.5; 
-        const oldRadius = ball.radius;
-        ball.radius = Math.min(ball.radius + growthFactor, maxBallRadius);
-        console.log(`[DEBUG COLLISION] Ball grown from ${oldRadius.toFixed(2)} to ${ball.radius.toFixed(2)}`);
-      }
-
-      // Calculer le volume sonore en fonction de la vitesse d'impact
-      const impactVolume = Math.min(initialSpeed / 15, 1) * bounceVolume * 0.3;
-      console.log(`[DEBUG WALL SOUND] Initial speed ${initialSpeed.toFixed(2)} converted to impact volume ${impactVolume.toFixed(2)}`);
-      
-      // Toujours jouer le son, indépendamment de l'immunité physique
-      if (standardSoundsEnabled) {
-        try {
-          // DEBUG: Afficher plus de détails sur les états sonores
-          console.log(`[DEBUG WALL SOUND] Wall: ${wall}, useCustomSounds: ${useCustomSounds}, hasCustomWall: ${hasCustomSound('wall')}, impactVolume: ${impactVolume}`);
-          
-          // Vérifier si un son personnalisé est disponible
-          if (useCustomSounds && hasCustomSound('wall')) {
-            // Si un son personnalisé est disponible, utiliser seulement le son personnalisé
-            console.log(`[DEBUG WALL SOUND] Playing custom wall sound for ${wall} collision`);
-            playWallSound(impactVolume, true);
-            
-            // DEBUG: Validation après l'appel
-            console.log(`[DEBUG WALL SOUND] Custom sound played with volume ${impactVolume}`);
-          } else {
-            // Si aucun son personnalisé n'est disponible, utiliser le son standard
-            console.log(`[DEBUG WALL SOUND] Reason for standard sound: useCustomSounds=${useCustomSounds}, hasCustomSound('wall')=${hasCustomSound('wall')}`);
-            console.log(`[DEBUG WALL SOUND] Using standard bounce sound for ${wall} collision`);
-            playBounceSound(impactVolume);
-          }
-        } catch (e) {
-          console.error(`[DEBUG WALL SOUND] Error playing wall collision sound:`, e);
-        }
-      } else {
-        console.log(`[DEBUG WALL SOUND] Standard sounds disabled, no sound played`);
-      }
-      
-      // Gestion MIDI
-      if (midiEnabled && typeof playMIDINote === 'function' && hasMIDISequence()) {
-        try {
-          const normalizedSpeed = Math.min(1, initialSpeed / 15);
-          const volume = 0.5 + normalizedSpeed * 0.5;
-          
-          // Jouer une note MIDI plus longue et plus audible
-          playMIDINote(volume * midiVolume);
-          
-          // Ajouter un délai pour jouer une seconde note pour rendre le son plus reconnaissable
-          if (normalizedSpeed > 0.5) {
-            setTimeout(() => playMIDINote(volume * 0.8 * midiVolume), 150);
-          }
-        } catch (e) {
-          console.error(`[BOUNCE-${wall}] Erreur MIDI:`, e);
-        }
-      }
-    } else {
-      console.log(`[DEBUG COLLISION] No wall collision detected`);
-    }
+  const addRandomAngle = (vx: number, vy: number): {x: number, y: number} => {
+    if (!RANDOM_BOUNCE_ANGLE) return {x: vx, y: vy};
+    const angle = Math.atan2(vy, vx);
+    const randomVariation = (Math.random() * 2 - 1) * RANDOM_ANGLE_MAX;
+    const newAngle = angle + randomVariation;
+    const speed = Math.sqrt(vx * vx + vy * vy);
+    console.log(`[DEBUG COLLISION] Random angle applied: ${(randomVariation * 180 / Math.PI).toFixed(2)} degrees`);
+    return { x: Math.cos(newAngle) * speed, y: Math.sin(newAngle) * speed };
   };
+  
+  let collided = false;
+  
+  // SAFETY_MARGIN ensures the ball is placed with enough clearance from the wall
+  const SAFETY_MARGIN = ball.radius * 0.1 + 2; // Increased from 0.05 to 0.1, and base value from 1 to 2
 
-  // New function to prevent wall sticking by checking and fixing ball positions each frame
-  const preventWallSticking = (ball: EnhancedBall, canvasWidth: number, canvasHeight: number) => {
-    const safetyMargin = ball.radius * 0.1 + 2; // More aggressive safety margin
+  // Check for collision and reflect velocity
+  // Ensure position is corrected to prevent sticking
+  if (ball.position.x + ball.radius > canvasWidth - WALL_MARGIN) {
+    wall = "right";
+    console.log(`[DEBUG COLLISION] Right wall collision detected`);
     
-    // Check and fix right wall sticking
-    if (ball.position.x + ball.radius >= canvasWidth - WALL_MARGIN) {
-      // Ball is touching or inside right wall
-      ball.position.x = canvasWidth - ball.radius - WALL_MARGIN - safetyMargin;
-      
-      // If velocity is too low or heading toward wall, push it away
-      if (ball.velocity.x >= -0.5) {
+    if (shouldUpdatePhysics) {
+      console.log(`[DEBUG COLLISION] Updating physics for right wall collision`);
+      // Corriger la position pour un contact exact avec le mur avec une marge de sécurité
+      ball.position.x = canvasWidth - ball.radius - WALL_MARGIN - SAFETY_MARGIN;
+      // Inverser la vélocité X avec un peu d'atténuation contrôlée par le bounciness
+      ball.velocity.x = -Math.abs(ball.velocity.x) * currentBounciness;
+      // Ensure minimum horizontal velocity away from wall
+      if (Math.abs(ball.velocity.x) < MIN_WALL_BOUNCE_VELOCITY) {
         ball.velocity.x = -MIN_WALL_BOUNCE_VELOCITY;
       }
+      // Appliquer une friction à la vélocité Y pour simuler une friction au mur
+      ball.velocity.y *= WALL_TANGENTIAL_FRICTION;
+      console.log(`[DEBUG COLLISION] After right wall: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
+    } else {
+      // Even during immunity, ensure ball is not inside wall
+      if (ball.position.x + ball.radius > canvasWidth - WALL_MARGIN) {
+        ball.position.x = canvasWidth - ball.radius - WALL_MARGIN - SAFETY_MARGIN;
+        
+        // Always ensure minimum velocity away from wall, even during immunity
+        if (ball.velocity.x >= -0.5) {
+          ball.velocity.x = -MIN_WALL_BOUNCE_VELOCITY;
+        }
+      }
+      console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
     }
     
-    // Check and fix left wall sticking
-    if (ball.position.x - ball.radius <= WALL_MARGIN) {
-      // Ball is touching or inside left wall
-      ball.position.x = ball.radius + WALL_MARGIN + safetyMargin;
-      
-      // If velocity is too low or heading toward wall, push it away
-      if (ball.velocity.x <= 0.5) {
+    collided = true;
+  } else if (ball.position.x - ball.radius < WALL_MARGIN) {
+    wall = "left";
+    console.log(`[DEBUG COLLISION] Left wall collision detected`);
+    
+    if (shouldUpdatePhysics) {
+      // Corriger la position pour un contact exact avec le mur avec une marge de sécurité
+      ball.position.x = ball.radius + WALL_MARGIN + SAFETY_MARGIN;
+      // Inverser la vélocité X avec un peu d'atténuation
+      ball.velocity.x = Math.abs(ball.velocity.x) * currentBounciness;
+      // Ensure minimum horizontal velocity away from wall
+      if (Math.abs(ball.velocity.x) < MIN_WALL_BOUNCE_VELOCITY) {
         ball.velocity.x = MIN_WALL_BOUNCE_VELOCITY;
       }
-    }
-    
-    // Check and fix floor sticking
-    if (ball.position.y + ball.radius >= canvasHeight - WALL_MARGIN) {
-      // Ball is touching or inside floor
-      ball.position.y = canvasHeight - ball.radius - WALL_MARGIN - safetyMargin;
-      
-      // If velocity is too low or heading toward floor, push it up
-      if (ball.velocity.y >= -0.5) {
-        ball.velocity.y = -MIN_WALL_BOUNCE_VELOCITY;
+      // Appliquer une friction à la vélocité Y
+      ball.velocity.y *= WALL_TANGENTIAL_FRICTION;
+      console.log(`[DEBUG COLLISION] After left wall: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
+    } else {
+      // Even during immunity, ensure ball is not inside wall
+      if (ball.position.x - ball.radius < WALL_MARGIN) {
+        ball.position.x = ball.radius + WALL_MARGIN + SAFETY_MARGIN;
+        
+        // Always ensure minimum velocity away from wall, even during immunity
+        if (ball.velocity.x <= 0.5) {
+          ball.velocity.x = MIN_WALL_BOUNCE_VELOCITY;
+        }
       }
+      console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
     }
     
-    // Check and fix ceiling sticking
-    if (ball.position.y - ball.radius <= WALL_MARGIN) {
-      // Ball is touching or inside ceiling
-      ball.position.y = ball.radius + WALL_MARGIN + safetyMargin;
+    collided = true;
+  }
+
+  // Traitement spécial pour le sol - essentiel pour fixer le glitch
+  if (ball.position.y + ball.radius > canvasHeight - WALL_MARGIN) {
+    wall = "floor";
+    
+    if (shouldUpdatePhysics) {
+      // IMPORTANT: S'assurer que la balle est exactement sur le sol avec une marge de sécurité
+      ball.position.y = canvasHeight - ball.radius - WALL_MARGIN - SAFETY_MARGIN;
       
-      // If velocity is too low or heading toward ceiling, push it down
-      if (ball.velocity.y <= 0.5) {
+      // Force minimale pour éviter que la balle "colle" au sol
+      const minBounceVelocity = MIN_WALL_BOUNCE_VELOCITY; // Using the constant for consistency
+      
+      // Si la vitesse est trop faible, ajouter une impulsion minimale
+      if (Math.abs(ball.velocity.y) < minBounceVelocity) {
+        ball.velocity.y = -minBounceVelocity;
+      } else {
+        // Sinon, rebond normal avec atténuation contrôlée
+        ball.velocity.y = -Math.abs(ball.velocity.y) * currentBounciness;
+      }
+      
+      // Appliquer une friction horizontale plus importante au sol
+      ball.velocity.x *= DEFAULT_FRICTION;
+      console.log(`[DEBUG COLLISION] After floor: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
+    } else {
+      // Even during immunity, ensure ball is not inside floor
+      if (ball.position.y + ball.radius > canvasHeight - WALL_MARGIN) {
+        ball.position.y = canvasHeight - ball.radius - WALL_MARGIN - SAFETY_MARGIN;
+        
+        // Always ensure minimum velocity away from floor, even during immunity
+        if (ball.velocity.y >= -0.5) {
+          ball.velocity.y = -MIN_WALL_BOUNCE_VELOCITY;
+        }
+      }
+      console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
+    }
+    
+    collided = true;
+  } else if (ball.position.y - ball.radius < WALL_MARGIN) {
+    wall = "ceiling";
+    
+    if (shouldUpdatePhysics) {
+      // Corriger la position pour un contact exact avec le plafond avec une marge de sécurité
+      ball.position.y = ball.radius + WALL_MARGIN + SAFETY_MARGIN;
+      // Inverser la vélocité Y avec atténuation
+      ball.velocity.y = Math.abs(ball.velocity.y) * currentBounciness;
+      // Ensure minimum vertical velocity away from ceiling
+      if (Math.abs(ball.velocity.y) < MIN_WALL_BOUNCE_VELOCITY) {
         ball.velocity.y = MIN_WALL_BOUNCE_VELOCITY;
       }
+      // Appliquer une friction à la vélocité X
+      ball.velocity.x *= WALL_TANGENTIAL_FRICTION;
+      console.log(`[DEBUG COLLISION] After ceiling: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
+    } else {
+      // Even during immunity, ensure ball is not inside ceiling
+      if (ball.position.y - ball.radius < WALL_MARGIN) {
+        ball.position.y = ball.radius + WALL_MARGIN + SAFETY_MARGIN;
+        
+        // Always ensure minimum velocity away from ceiling, even during immunity
+        if (ball.velocity.y <= 0.5) {
+          ball.velocity.y = MIN_WALL_BOUNCE_VELOCITY;
+        }
+      }
+      console.log(`[DEBUG COLLISION] Skipping physics update due to immunity time`);
     }
-  };
+    
+    collided = true;
+  }
 
-  useEffect(() => {
-    if (isPlaying) {
-      // Start the animation if it's not already running
-      if (!requestRef.current) {
-        initSound();
+  if (collided && wall) {
+    // Mettre à jour le temps de collision uniquement si nous mettons à jour la physique
+    if (shouldUpdatePhysics) {
+      ball.lastWallCollisionTime = currentTime;
+      console.log(`[DEBUG COLLISION] Updated lastWallCollisionTime to ${currentTime}`);
+
+      const newV = addRandomAngle(ball.velocity.x, ball.velocity.y);
+      ball.velocity.x = newV.x;
+      ball.velocity.y = newV.y;
+      console.log(`[DEBUG COLLISION] After random angle: velocity=(${ball.velocity.x.toFixed(2)}, ${ball.velocity.y.toFixed(2)})`);
+      
+      // Grow the ball on collision
+      const maxBallRadius = (Math.min(canvasWidth, canvasHeight) / 2) * MAX_BALL_RADIUS_FACTOR;
+      const growthFactor = growthRate * 0.5; 
+      const oldRadius = ball.radius;
+      ball.radius = Math.min(ball.radius + growthFactor, maxBallRadius);
+      console.log(`[DEBUG COLLISION] Ball grown from ${oldRadius.toFixed(2)} to ${ball.radius.toFixed(2)}`);
+    }
+
+    // Calculer le volume sonore en fonction de la vitesse d'impact
+    const impactVolume = Math.min(initialSpeed / 15, 1) * bounceVolume * 0.3;
+    console.log(`[DEBUG WALL SOUND] Initial speed ${initialSpeed.toFixed(2)} converted to impact volume ${impactVolume.toFixed(2)}`);
+    
+    // Toujours jouer le son, indépendamment de l'immunité physique
+    if (standardSoundsEnabled) {
+      try {
+        // DEBUG: Afficher plus de détails sur les états sonores
+        console.log(`[DEBUG WALL SOUND] Wall: ${wall}, useCustomSounds: ${useCustomSounds}, hasCustomWall: ${hasCustomSound('wall')}, impactVolume: ${impactVolume}`);
         
-        // Set the MIDI tonality and instrument preset
-        if (midiEnabled) {
-          setMIDITonality(midiTonality);
-          if (midiInstrumentPreset) {
-            setMIDIInstrumentPreset(midiInstrumentPreset);
-          }
-          if (midiTrackIndex !== undefined) {
-            setMIDITrackIndex(midiTrackIndex);
-          }
-          setMIDIVolume(midiVolume);
-        }
-        
-        // Set progressive sound volume
-        if (progressiveSoundEnabled && hasProgressiveSound()) {
-          setProgressiveSoundVolume(progressiveSoundVolume);
-        }
-        
-        // Create the initial balls only when game starts
-        if (gameState.balls.length === 0) {
-          const initialBalls: EnhancedBall[] = [];
-          const canvas = canvasRef.current;
+        // Vérifier si un son personnalisé est disponible
+        if (useCustomSounds && hasCustomSound('wall')) {
+          // Si un son personnalisé est disponible, utiliser seulement le son personnalisé
+          console.log(`[DEBUG WALL SOUND] Playing custom wall sound for ${wall} collision`);
+          playWallSound(impactVolume, true);
           
-          if (canvas) {
-            for (let i = 0; i < initialBallCount; i++) {
-              // Create a ball with random position but constrained within the canvas
-              const centerX = Math.random() * canvas.width * 0.8 + canvas.width * 0.1;
-              const centerY = Math.random() * canvas.height * 0.8 + canvas.height * 0.1;
-              
-              const angle = Math.random() * Math.PI * 2;
-              const speed = ballSpeed * (0.7 + Math.random() * 0.6); // Variation in speed
-              
-              // Give each ball a random direction
-              const vx = Math.cos(angle) * speed;
-              const vy = Math.sin(angle) * speed;
-              
-              // Variation in size
-              const radius = 20 + Math.random() * 15;
-              
-              // Randomly assign colors
-              const colors = ['red', 'blue', 'green', 'yellow', 'purple', 'orange'];
-              const color = colors[Math.floor(Math.random() * colors.length)];
-              
-              // Assign an image if using custom images
-              let imageIndex = -1;
-              let ballImage = null;
-              if (useCustomImages && customImages.length > 0 && loadedImages.length > 0) {
-                // Use assigned image if available, otherwise random
-                imageIndex = ballImageAssignments[i] !== undefined ? 
-                  ballImageAssignments[i] : 
-                  Math.floor(Math.random() * loadedImages.length);
-                
-                // Ensure index is within bounds
-                imageIndex = Math.max(0, Math.min(loadedImages.length - 1, imageIndex));
-                ballImage = loadedImages[imageIndex];
-              }
-              
-              // Assign a music scale if music is enabled
-              let musicScale: MusicScaleKey | CustomMusicKey | undefined = undefined;
-              if (musicEnabled) {
-                if (ballMusicAssignments[i]) {
-                  // Use assigned scale if available
-                  musicScale = ballMusicAssignments[i];
-                } else {
-                  // Otherwise random scale
-                  const scales = Object.keys(MUSIC_SCALES) as MusicScaleKey[];
-                  musicScale = scales[Math.floor(Math.random() * scales.length)];
-                }
-              }
-              
-              const newBall: EnhancedBall = {
-                id: `ball-${Date.now()}-${i}`,
-                position: { x: centerX, y: centerY },
-                velocity: { x: vx, y: vy },
-                radius,
-                color,
-                image: ballImage,
-                imageIndex: imageIndex,
-                pulseEffect: 0,
-                glowSize: 0, 
-                glowOpacity: 0,
-                squash: 0,
-                rotation: 0,
-                score: 0,
-                lastCollisionTime: 0,
-                lastWallCollisionTime: 0,
-                growing: false,
-                musicScale,
-                // Masse proportionnelle au rayon
-                mass: radius * radius * 0.01,
-                // Élasticité aléatoire pour varier les rebonds
-                elasticity: 0.8 + Math.random() * 0.2,
-                // Légère rotation aléatoire
-                angularVelocity: (Math.random() - 0.5) * 0.02,
-                // Stocker la vitesse initiale pour maintenir constante (si besoin)
-                initialSpeed: speed
-              };
-              
-              initialBalls.push(newBall);
-            }
-            
-            setGameState(prevState => ({
-              ...prevState,
-              balls: initialBalls,
-              score: 0,
-              isGameOver: false
-            }));
-          }
+          // DEBUG: Validation après l'appel
+          console.log(`[DEBUG WALL SOUND] Custom sound played with volume ${impactVolume}`);
+        } else {
+          // Si aucun son personnalisé n'est disponible, utiliser le son standard
+          console.log(`[DEBUG WALL SOUND] Reason for standard sound: useCustomSounds=${useCustomSounds}, hasCustomSound('wall')=${hasCustomSound('wall')}`);
+          console.log(`[DEBUG WALL SOUND] Using standard bounce sound for ${wall} collision`);
+          playBounceSound(impactVolume);
         }
-        
-        // Comme 'animate' est définie dans le composant, nous ne pouvons pas y référer directement ici
-        // Nous devons juste lancer l'animation initiale et laisser la récursion fonctionner
-        requestRef.current = requestAnimationFrame(() => {
-          // La fonction animate sera appelée automatiquement lorsque le composant sera entièrement rendu
-        });
+      } catch (e) {
+        console.error(`[DEBUG WALL SOUND] Error playing wall collision sound:`, e);
       }
     } else {
-      // Stop the animation
-      if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current);
-        requestRef.current = undefined;
+      console.log(`[DEBUG WALL SOUND] Standard sounds disabled, no sound played`);
+    }
+    
+    // Gestion MIDI
+    if (midiEnabled && typeof playMIDINote === 'function' && hasMIDISequence()) {
+      try {
+        const normalizedSpeed = Math.min(1, initialSpeed / 15);
+        const volume = 0.5 + normalizedSpeed * 0.5;
+        
+        // Jouer une note MIDI plus longue et plus audible
+        playMIDINote(volume * midiVolume);
+        
+        // Ajouter un délai pour jouer une seconde note pour rendre le son plus reconnaissable
+        if (normalizedSpeed > 0.5) {
+          setTimeout(() => playMIDINote(volume * 0.8 * midiVolume), 150);
+        }
+      } catch (e) {
+        console.error(`[BOUNCE-${wall}] Erreur MIDI:`, e);
       }
     }
+  } else {
+    console.log(`[DEBUG COLLISION] No wall collision detected`);
+  }
+};
+
+// New function to prevent wall sticking by checking and fixing ball positions each frame
+const preventWallSticking = (ball: EnhancedBall, canvasWidth: number, canvasHeight: number) => {
+  const safetyMargin = ball.radius * 0.1 + 2; // More aggressive safety margin
+  
+  // Check and fix right wall sticking
+  if (ball.position.x + ball.radius >= canvasWidth - WALL_MARGIN) {
+    // Ball is touching or inside right wall
+    ball.position.x = canvasWidth - ball.radius - WALL_MARGIN - safetyMargin;
     
-    return () => {
-      if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current);
-        requestRef.current = undefined;
+    // If velocity is too low or heading toward wall, push it away
+    if (ball.velocity.x >= -0.5) {
+      ball.velocity.x = -MIN_WALL_BOUNCE_VELOCITY;
+    }
+  }
+  
+  // Check and fix left wall sticking
+  if (ball.position.x - ball.radius <= WALL_MARGIN) {
+    // Ball is touching or inside left wall
+    ball.position.x = ball.radius + WALL_MARGIN + safetyMargin;
+    
+    // If velocity is too low or heading toward wall, push it away
+    if (ball.velocity.x <= 0.5) {
+      ball.velocity.x = MIN_WALL_BOUNCE_VELOCITY;
+    }
+  }
+  
+  // Check and fix floor sticking
+  if (ball.position.y + ball.radius >= canvasHeight - WALL_MARGIN) {
+    // Ball is touching or inside floor
+    ball.position.y = canvasHeight - ball.radius - WALL_MARGIN - safetyMargin;
+    
+    // If velocity is too low or heading toward floor, push it up
+    if (ball.velocity.y >= -0.5) {
+      ball.velocity.y = -MIN_WALL_BOUNCE_VELOCITY;
+    }
+  }
+  
+  // Check and fix ceiling sticking
+  if (ball.position.y - ball.radius <= WALL_MARGIN) {
+    // Ball is touching or inside ceiling
+    ball.position.y = ball.radius + WALL_MARGIN + safetyMargin;
+    
+    // If velocity is too low or heading toward ceiling, push it down
+    if (ball.velocity.y <= 0.5) {
+      ball.velocity.y = MIN_WALL_BOUNCE_VELOCITY;
+    }
+  }
+};
+
+useEffect(() => {
+  if (isPlaying) {
+    // Start the animation if it's not already running
+    if (!requestRef.current) {
+      initSound();
+      
+      // Set the MIDI tonality and instrument preset
+      if (midiEnabled) {
+        setMIDITonality(midiTonality);
+        if (midiInstrumentPreset) {
+          setMIDIInstrumentPreset(midiInstrumentPreset);
+        }
+        if (midiTrackIndex !== undefined) {
+          setMIDITrackIndex(midiTrackIndex);
+        }
+        setMIDIVolume(midiVolume);
       }
-    };
-  }, [isPlaying, ballCount, growthRate, gravity, ballSpeed]);  // Removed effectsEnabled from dependency array
-
-  // Helper function to convert hex color to RGB values
-  const hexToRgb = (hex: string): string => {
-    // If already in RGB format, extract values
-    if (hex.startsWith('rgb')) {
-      return hex.replace(/^rgba?\(|\)$/g, '').split(',').slice(0, 3).join(',');
-    }
-    
-    // Otherwise convert from hex
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    if (result) {
-      const r = parseInt(result[1], 16);
-      const g = parseInt(result[2], 16);
-      const b = parseInt(result[3], 16);
-      return `${r}, ${g}, ${b}`;
-    }
-    return '0, 0, 0'; // Default to black if invalid
-  };
-
-  // Create styles for recording controls
-  const recordingControlsStyles = {
-    container: {
-      position: 'absolute' as const,
-      bottom: '20px',
-      left: '50%',
-      transform: 'translateX(-50%)',
-      display: 'flex',
-      gap: '10px',
-      zIndex: 1000,
-    },
-    button: {
-      backgroundColor: 'rgba(0, 0, 0, 0.7)',
-      color: 'white',
-      border: 'none',
-      borderRadius: '50%',
-      width: '50px',
-      height: '50px',
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      cursor: 'pointer',
-      fontSize: '20px',
-      boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
-    },
-    recordButton: {
-      backgroundColor: isRecording ? 'rgba(255, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-    },
-    downloadButton: {
-      opacity: videoBlob ? 1 : 0.5,
-      pointerEvents: videoBlob ? 'auto' : 'none' as React.CSSProperties['pointerEvents'],
-    }
-  };
-
-  // Clean up animation on unmount
-  useEffect(() => {
-    return () => {
-      if (circleAnimationRef.current) {
-        cancelAnimationFrame(circleAnimationRef.current);
+      
+      // Set progressive sound volume
+      if (progressiveSoundEnabled && hasProgressiveSound()) {
+        setProgressiveSoundVolume(progressiveSoundVolume);
       }
-    };
-  }, []);
-
-  // Function to handle color change
-  const handleColorChange = (type: 'backgroundColor' | 'circleColor', value: string) => {
-    setConfigSettings(prev => ({
-      ...prev,
-      [type]: value
-    }));
-    
-    // Notify parent component
-    if (type === 'backgroundColor' && onBackgroundColorChange) {
-      onBackgroundColorChange(value);
-    } else if (type === 'circleColor' && onCircleColorChange) {
-      onCircleColorChange(value);
+      
+      // Create the initial balls only when game starts
+      if (gameState.balls.length === 0) {
+        const initialBalls: EnhancedBall[] = [];
+        const canvas = canvasRef.current;
+        
+        if (canvas) {
+          for (let i = 0; i < initialBallCount; i++) {
+            // Create a ball with random position but constrained within the canvas
+            const centerX = Math.random() * canvas.width * 0.8 + canvas.width * 0.1;
+            const centerY = Math.random() * canvas.height * 0.8 + canvas.height * 0.1;
+            
+            const angle = Math.random() * Math.PI * 2;
+            const speed = ballSpeed * (0.7 + Math.random() * 0.6); // Variation in speed
+            
+            // Give each ball a random direction
+            const vx = Math.cos(angle) * speed;
+            const vy = Math.sin(angle) * speed;
+            
+            // Variation in size
+            const radius = 20 + Math.random() * 15;
+            
+            // Randomly assign colors
+            const colors = ['red', 'blue', 'green', 'yellow', 'purple', 'orange'];
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            
+            // Assign an image if using custom images
+            let imageIndex = -1;
+            let ballImage = null;
+            if (useCustomImages && customImages.length > 0 && loadedImages.length > 0) {
+              // Use assigned image if available, otherwise random
+              imageIndex = ballImageAssignments[i] !== undefined ? 
+                ballImageAssignments[i] : 
+                Math.floor(Math.random() * loadedImages.length);
+              
+              // Ensure index is within bounds
+              imageIndex = Math.max(0, Math.min(loadedImages.length - 1, imageIndex));
+              ballImage = loadedImages[imageIndex];
+            }
+            
+            // Assign a music scale if music is enabled
+            let musicScale: MusicScaleKey | CustomMusicKey | undefined = undefined;
+            if (musicEnabled) {
+              if (ballMusicAssignments[i]) {
+                // Use assigned scale if available
+                musicScale = ballMusicAssignments[i];
+              } else {
+                // Otherwise random scale
+                const scales = Object.keys(MUSIC_SCALES) as MusicScaleKey[];
+                musicScale = scales[Math.floor(Math.random() * scales.length)];
+              }
+            }
+            
+            const newBall: EnhancedBall = {
+              id: `ball-${Date.now()}-${i}`,
+              position: { x: centerX, y: centerY },
+              velocity: { x: vx, y: vy },
+              radius,
+              color,
+              image: ballImage,
+              imageIndex: imageIndex,
+              pulseEffect: 0,
+              glowSize: 0, 
+              glowOpacity: 0,
+              squash: 0,
+              rotation: 0,
+              score: 0,
+              lastCollisionTime: 0,
+              lastWallCollisionTime: 0,
+              growing: false,
+              musicScale,
+              // Masse proportionnelle au rayon
+              mass: radius * radius * 0.01,
+              // Élasticité aléatoire pour varier les rebonds
+              elasticity: 0.8 + Math.random() * 0.2,
+              // Légère rotation aléatoire
+              angularVelocity: (Math.random() - 0.5) * 0.02,
+              // Stocker la vitesse initiale pour maintenir constante (si besoin)
+              initialSpeed: speed
+            };
+            
+            initialBalls.push(newBall);
+          }
+          
+          setGameState(prevState => ({
+            ...prevState,
+            balls: initialBalls,
+            score: 0,
+            isGameOver: false
+          }));
+        }
+      }
+      
+      // Comme 'animate' est définie dans le composant, nous ne pouvons pas y référer directement ici
+      // Nous devons juste lancer l'animation initiale et laisser la récursion fonctionner
+      requestRef.current = requestAnimationFrame(() => {
+        // La fonction animate sera appelée automatiquement lorsque le composant sera entièrement rendu
+      });
+    }
+  } else {
+    // Stop the animation
+    if (requestRef.current) {
+      cancelAnimationFrame(requestRef.current);
+      requestRef.current = undefined;
+    }
+  }
+  
+  return () => {
+    if (requestRef.current) {
+      cancelAnimationFrame(requestRef.current);
+      requestRef.current = undefined;
     }
   };
+}, [isPlaying, ballCount, growthRate, gravity, ballSpeed]);  // Removed effectsEnabled from dependency array
 
-  // Function to handle toggle change
-  const handleToggleChange = (type: 'circleAnimationEnabled' | 'showRecordingControls') => {
-    const newValue = !configSettings[type];
-    
-    setConfigSettings(prev => ({
-      ...prev,
-      [type]: newValue
-    }));
-    
-    // Notify parent component
-    if (type === 'circleAnimationEnabled' && onCircleAnimationEnabledChange) {
-      onCircleAnimationEnabledChange(newValue);
-    } else if (type === 'showRecordingControls' && onShowRecordingControlsChange) {
-      onShowRecordingControlsChange(newValue);
-    }
-  };
+// Helper function to convert hex color to RGB values
+const hexToRgb = (hex: string): string => {
+  // If already in RGB format, extract values
+  if (hex.startsWith('rgb')) {
+    return hex.replace(/^rgba?\(|\)$/g, '').split(',').slice(0, 3).join(',');
+  }
+  
+  // Otherwise convert from hex
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (result) {
+    const r = parseInt(result[1], 16);
+    const g = parseInt(result[2], 16);
+    const b = parseInt(result[3], 16);
+    return `${r}, ${g}, ${b}`;
+  }
+  return '0, 0, 0'; // Default to black if invalid
+};
 
-  // Function to handle slider change
-  const handleSliderChange = (type: 'circleAnimationDuration', value: number) => {
-    setConfigSettings(prev => ({
-      ...prev,
-      [type]: value
-    }));
-    
-    // Notify parent component
-    if (type === 'circleAnimationDuration' && onCircleAnimationDurationChange) {
-      onCircleAnimationDurationChange(value);
-    }
-  };
-
-  // Function to create a style attribute for the toggle slider
-  const getToggleStyles = (toggled: boolean) => {
-    return {
-      position: 'absolute' as const,
-      cursor: 'pointer',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: toggled ? '#f85c2c' : '#ccc',
-      transition: '.4s',
-      borderRadius: '34px',
-      '&:before': {
-        content: '""',
-        position: 'absolute' as const,
-        height: '16px',
-        width: '16px',
-        left: toggled ? '18px' : '2px',
-        bottom: '2px',
-        backgroundColor: 'white',
-        transition: '.4s',
-        borderRadius: '50%',
-      },
-    };
-  };
-
-  // Add a toggle button for the config panel
-  const configButtonStyle = {
+// Create styles for recording controls
+const recordingControlsStyles = {
+  container: {
     position: 'absolute' as const,
-    top: '10px',
-    left: '10px',
+    bottom: '20px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    display: 'flex',
+    gap: '10px',
+    zIndex: 1000,
+  },
+  button: {
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     color: 'white',
     border: 'none',
     borderRadius: '50%',
-    width: '40px',
-    height: '40px',
+    width: '50px',
+    height: '50px',
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'center',
     cursor: 'pointer',
     fontSize: '20px',
     boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
-    zIndex: 1000,
-  };
+  },
+  recordButton: {
+    backgroundColor: isRecording ? 'rgba(255, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+  },
+  downloadButton: {
+    opacity: videoBlob ? 1 : 0.5,
+    pointerEvents: videoBlob ? 'auto' : 'none' as React.CSSProperties['pointerEvents'],
+  }
+};
 
-  // Styles for the config panel
-  const configPanelStyles = {
-    container: {
+// Clean up animation on unmount
+useEffect(() => {
+  return () => {
+    if (circleAnimationRef.current) {
+      cancelAnimationFrame(circleAnimationRef.current);
+    }
+  };
+}, []);
+
+// Function to handle color change
+const handleColorChange = (type: 'backgroundColor' | 'circleColor', value: string) => {
+  setConfigSettings(prev => ({
+    ...prev,
+    [type]: value
+  }));
+  
+  // Notify parent component
+  if (type === 'backgroundColor' && onBackgroundColorChange) {
+    onBackgroundColorChange(value);
+  } else if (type === 'circleColor' && onCircleColorChange) {
+    onCircleColorChange(value);
+  }
+};
+
+// Function to handle toggle change
+const handleToggleChange = (type: 'circleAnimationEnabled' | 'showRecordingControls') => {
+  const newValue = !configSettings[type];
+  
+  setConfigSettings(prev => ({
+    ...prev,
+    [type]: newValue
+  }));
+  
+  // Notify parent component
+  if (type === 'circleAnimationEnabled' && onCircleAnimationEnabledChange) {
+    onCircleAnimationEnabledChange(newValue);
+  } else if (type === 'showRecordingControls' && onShowRecordingControlsChange) {
+    onShowRecordingControlsChange(newValue);
+  }
+};
+
+// Function to handle slider change
+const handleSliderChange = (type: 'circleAnimationDuration', value: number) => {
+  setConfigSettings(prev => ({
+    ...prev,
+    [type]: value
+  }));
+  
+  // Notify parent component
+  if (type === 'circleAnimationDuration' && onCircleAnimationDurationChange) {
+    onCircleAnimationDurationChange(value);
+  }
+};
+
+// Function to create a style attribute for the toggle slider
+const getToggleStyles = (toggled: boolean) => {
+  return {
+    position: 'absolute' as const,
+    cursor: 'pointer',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: toggled ? '#f85c2c' : '#ccc',
+    transition: '.4s',
+    borderRadius: '34px',
+    '&:before': {
+      content: '""',
       position: 'absolute' as const,
-      top: '10px',
-      right: '10px',
-      backgroundColor: 'rgba(0, 0, 0, 0.8)',
-      border: '1px solid rgba(255, 255, 255, 0.2)',
-      borderRadius: '10px',
-      padding: '15px',
-      width: '250px',
-      color: 'white',
-      zIndex: 1000,
-      backdropFilter: 'blur(5px)',
-      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
-      transition: 'all 0.3s ease',
-    },
-    title: {
-      margin: '0 0 15px 0',
-      fontSize: '16px',
-      fontWeight: 'bold' as const,
-      textAlign: 'center' as const,
-      borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
-      paddingBottom: '8px',
-    },
-    group: {
-      marginBottom: '12px',
-    },
-    label: {
-      display: 'block',
-      marginBottom: '5px',
-      fontSize: '14px',
-    },
-    colorPicker: {
-      width: '100%',
-      height: '30px',
-      border: 'none',
-      outline: 'none',
-      cursor: 'pointer',
-      backgroundColor: 'transparent',
-    },
-    toggleContainer: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: '12px',
-    },
-    toggle: {
-      position: 'relative' as const,
-      width: '40px',
-      height: '20px',
-    },
-    toggleInput: {
-      opacity: 0,
-      width: 0,
-      height: 0,
-    },
-    toggleSlider: {
-      position: 'absolute' as const,
-      cursor: 'pointer',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: '#ccc',
+      height: '16px',
+      width: '16px',
+      left: toggled ? '18px' : '2px',
+      bottom: '2px',
+      backgroundColor: 'white',
       transition: '.4s',
-      borderRadius: '34px',
-      '&:before': {
-        position: 'absolute',
-        content: '',
-        height: '16px',
-        width: '16px',
-        left: '2px',
-        bottom: '2px',
-        backgroundColor: 'white',
-        transition: '.4s',
-        borderRadius: '50%',
-      },
-    },
-    rangeContainer: {
-      width: '100%',
-      marginTop: '5px',
-    },
-    rangeInput: {
-      width: '100%',
-      accentColor: '#f85c2c',
-    },
-    rangeValue: {
-      fontSize: '12px',
-      textAlign: 'right' as const,
-      marginTop: '2px',
-    },
-    button: {
-      backgroundColor: '#f85c2c',
-      color: 'white',
-      border: 'none',
-      borderRadius: '5px',
-      padding: '8px 12px',
-      fontSize: '14px',
-      cursor: 'pointer',
-      width: '100%',
-      marginTop: '10px',
-      transition: 'background-color 0.2s',
-      '&:hover': {
-        backgroundColor: '#e64c17',
-      },
+      borderRadius: '50%',
     },
   };
+};
 
-  // Return the JSX canvas element with recording controls and config panel
-  return (
-    <div 
-      className="growing-ball-game" 
+// Add a toggle button for the config panel
+const configButtonStyle = {
+  position: 'absolute' as const,
+  top: '10px',
+  left: '10px',
+  backgroundColor: 'rgba(0, 0, 0, 0.7)',
+  color: 'white',
+  border: 'none',
+  borderRadius: '50%',
+  width: '40px',
+  height: '40px',
+  display: 'flex',
+  justifyContent: 'center',
+  alignItems: 'center',
+  cursor: 'pointer',
+  fontSize: '20px',
+  boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+  zIndex: 1000,
+};
+
+// Styles for the config panel
+const configPanelStyles = {
+  container: {
+    position: 'absolute' as const,
+    top: '10px',
+    right: '10px',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+    borderRadius: '10px',
+    padding: '15px',
+    width: '250px',
+    color: 'white',
+    zIndex: 1000,
+    backdropFilter: 'blur(5px)',
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
+    transition: 'all 0.3s ease',
+  },
+  title: {
+    margin: '0 0 15px 0',
+    fontSize: '16px',
+    fontWeight: 'bold' as const,
+    textAlign: 'center' as const,
+    borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
+    paddingBottom: '8px',
+  },
+  group: {
+    marginBottom: '12px',
+  },
+  label: {
+    display: 'block',
+    marginBottom: '5px',
+    fontSize: '14px',
+  },
+  colorPicker: {
+    width: '100%',
+    height: '30px',
+    border: 'none',
+    outline: 'none',
+    cursor: 'pointer',
+    backgroundColor: 'transparent',
+  },
+  toggleContainer: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '12px',
+  },
+  toggle: {
+    position: 'relative' as const,
+    width: '40px',
+    height: '20px',
+  },
+  toggleInput: {
+    opacity: 0,
+    width: 0,
+    height: 0,
+  },
+  toggleSlider: {
+    position: 'absolute' as const,
+    cursor: 'pointer',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#ccc',
+    transition: '.4s',
+    borderRadius: '34px',
+    '&:before': {
+      position: 'absolute',
+      content: '',
+      height: '16px',
+      width: '16px',
+      left: '2px',
+      bottom: '2px',
+      backgroundColor: 'white',
+      transition: '.4s',
+      borderRadius: '50%',
+    },
+  },
+  rangeContainer: {
+    width: '100%',
+    marginTop: '5px',
+  },
+  rangeInput: {
+    width: '100%',
+    accentColor: '#f85c2c',
+  },
+  rangeValue: {
+    fontSize: '12px',
+    textAlign: 'right' as const,
+    marginTop: '2px',
+  },
+  button: {
+    backgroundColor: '#f85c2c',
+    color: 'white',
+    border: 'none',
+    borderRadius: '5px',
+    padding: '8px 12px',
+    fontSize: '14px',
+    cursor: 'pointer',
+    width: '100%',
+    marginTop: '10px',
+    transition: 'background-color 0.2s',
+    '&:hover': {
+      backgroundColor: '#e64c17',
+    },
+  },
+};
+
+// Return the JSX canvas element with recording controls and config panel
+return (
+  <div 
+    className="growing-ball-game" 
+    style={{ 
+      display: 'flex', 
+      justifyContent: 'center', 
+      alignItems: 'center',
+      width: '100%',
+      height: '100%',
+      position: 'relative'
+    }}
+  >
+    <canvas 
+      ref={canvasRef}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
       style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center',
-        width: '100%',
-        height: '100%',
-        position: 'relative'
+        display: 'block', 
+        background: configSettings.backgroundColor, 
+        touchAction: 'none',
+        border: '1px solid rgba(255,255,255,0.2)',
+        boxShadow: '0 0 10px rgba(0,0,0,0.5)'
       }}
+    />
+    {isRecording && (
+      <div style={recordingStyles.container}>
+        <div style={recordingStyles.recordIcon}></div>
+        <div style={recordingStyles.time}>{formatRecordingTime(recordingTime)}</div>
+      </div>
+    )}
+    {configSettings.showRecordingControls && (
+      <div style={recordingControlsStyles.container}>
+        <button 
+          onClick={toggleRecording} 
+          style={{...recordingControlsStyles.button, ...recordingControlsStyles.recordButton}}
+          title={isRecording ? "Stop Recording" : "Start Recording"}
+        >
+          {isRecording ? '◼' : '⚫'}
+        </button>
+        <button 
+          onClick={handleDownloadVideo} 
+          style={{...recordingControlsStyles.button, ...recordingControlsStyles.downloadButton}}
+          title="Download Video"
+          disabled={!videoBlob}
+        >
+          ⬇️
+        </button>
+      </div>
+    )}
+    <button 
+      onClick={() => setIsConfigPanelVisible(!isConfigPanelVisible)}
+      style={configButtonStyle}
+      title="Settings"
     >
-      <canvas 
-        ref={canvasRef}
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
-        style={{ 
-          display: 'block', 
-          background: configSettings.backgroundColor, 
-          touchAction: 'none',
-          border: '1px solid rgba(255,255,255,0.2)',
-          boxShadow: '0 0 10px rgba(0,0,0,0.5)'
-        }}
-      />
-      {isRecording && (
-        <div style={recordingStyles.container}>
-          <div style={recordingStyles.recordIcon}></div>
-          <div style={recordingStyles.time}>{formatRecordingTime(recordingTime)}</div>
+      ⚙️
+    </button>
+    {isConfigPanelVisible && (
+      <div style={configPanelStyles.container}>
+        <div style={configPanelStyles.title}>Game Settings</div>
+        
+        <div style={configPanelStyles.group}>
+          <label style={configPanelStyles.label}>Background Color</label>
+          <input 
+            type="color" 
+            value={configSettings.backgroundColor} 
+            onChange={(e) => handleColorChange('backgroundColor', e.target.value)}
+            style={configPanelStyles.colorPicker}
+          />
         </div>
-      )}
-      {configSettings.showRecordingControls && (
-        <div style={recordingControlsStyles.container}>
-          <button 
-            onClick={toggleRecording} 
-            style={{...recordingControlsStyles.button, ...recordingControlsStyles.recordButton}}
-            title={isRecording ? "Stop Recording" : "Start Recording"}
-          >
-            {isRecording ? '◼' : '⚫'}
-          </button>
-          <button 
-            onClick={handleDownloadVideo} 
-            style={{...recordingControlsStyles.button, ...recordingControlsStyles.downloadButton}}
-            title="Download Video"
-            disabled={!videoBlob}
-          >
-            ⬇️
-          </button>
+        
+        <div style={configPanelStyles.group}>
+          <label style={configPanelStyles.label}>Circle Color</label>
+          <input 
+            type="color" 
+            value={configSettings.circleColor.startsWith('rgba') 
+              ? '#' + configSettings.circleColor.replace(/^rgba\((\d+),\s*(\d+),\s*(\d+).*$/, 
+                 (_, r, g, b) => {
+                   return ((1 << 24) + (parseInt(r) << 16) + (parseInt(g) << 8) + parseInt(b)).toString(16).slice(1);
+                 }) 
+              : configSettings.circleColor}
+            onChange={(e) => handleColorChange('circleColor', e.target.value)}
+            style={configPanelStyles.colorPicker}
+          />
         </div>
-      )}
-      <button 
-        onClick={() => setIsConfigPanelVisible(!isConfigPanelVisible)}
-        style={configButtonStyle}
-        title="Settings"
-      >
-        ⚙️
-      </button>
-      {isConfigPanelVisible && (
-        <div style={configPanelStyles.container}>
-          <div style={configPanelStyles.title}>Game Settings</div>
-          
-          <div style={configPanelStyles.group}>
-            <label style={configPanelStyles.label}>Background Color</label>
+        
+        <div style={configPanelStyles.toggleContainer}>
+          <span>Circle Animation</span>
+          <label style={configPanelStyles.toggle}>
             <input 
-              type="color" 
-              value={configSettings.backgroundColor} 
-              onChange={(e) => handleColorChange('backgroundColor', e.target.value)}
-              style={configPanelStyles.colorPicker}
+              type="checkbox" 
+              checked={configSettings.circleAnimationEnabled} 
+              onChange={() => handleToggleChange('circleAnimationEnabled')}
+              style={configPanelStyles.toggleInput}
             />
-          </div>
-          
-          <div style={configPanelStyles.group}>
-            <label style={configPanelStyles.label}>Circle Color</label>
-            <input 
-              type="color" 
-              value={configSettings.circleColor.startsWith('rgba') 
-                ? '#' + configSettings.circleColor.replace(/^rgba\((\d+),\s*(\d+),\s*(\d+).*$/, 
-                   (_, r, g, b) => {
-                     return ((1 << 24) + (parseInt(r) << 16) + (parseInt(g) << 8) + parseInt(b)).toString(16).slice(1);
-                   }) 
-                : configSettings.circleColor}
-              onChange={(e) => handleColorChange('circleColor', e.target.value)}
-              style={configPanelStyles.colorPicker}
-            />
-          </div>
-          
-          <div style={configPanelStyles.toggleContainer}>
-            <span>Circle Animation</span>
-            <label style={configPanelStyles.toggle}>
-              <input 
-                type="checkbox" 
-                checked={configSettings.circleAnimationEnabled} 
-                onChange={() => handleToggleChange('circleAnimationEnabled')}
-                style={configPanelStyles.toggleInput}
-              />
-              <span style={{
-                position: 'absolute',
-                cursor: 'pointer',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backgroundColor: configSettings.circleAnimationEnabled ? '#f85c2c' : '#ccc',
-                transition: '.4s',
-                borderRadius: '34px',
-              }}>
-                <span style={{
-                  position: 'absolute',
-                  content: '""',
-                  height: '16px',
-                  width: '16px',
-                  left: configSettings.circleAnimationEnabled ? '18px' : '2px',
-                  bottom: '2px',
-                  backgroundColor: 'white',
-                  transition: '.4s',
-                  borderRadius: '50%',
-                }}></span>
-              </span>
-            </label>
-          </div>
-          
-          {configSettings.circleAnimationEnabled && (
-            <div style={configPanelStyles.group}>
-              <label style={configPanelStyles.label}>Animation Duration: {configSettings.circleAnimationDuration}ms</label>
-              <div style={configPanelStyles.rangeContainer}>
-                <input 
-                  type="range" 
-                  min="100" 
-                  max="2000" 
-                  step="50" 
-                  value={configSettings.circleAnimationDuration} 
-                  onChange={(e) => handleSliderChange('circleAnimationDuration', parseInt(e.target.value))}
-                  style={configPanelStyles.rangeInput}
-                />
-              </div>
-            </div>
-          )}
-          
-          <div style={configPanelStyles.toggleContainer}>
-            <span>Recording Controls</span>
-            <label style={configPanelStyles.toggle}>
-              <input 
-                type="checkbox" 
-                checked={configSettings.showRecordingControls} 
-                onChange={() => handleToggleChange('showRecordingControls')}
-                style={configPanelStyles.toggleInput}
-              />
-              <span style={{
-                position: 'absolute',
-                cursor: 'pointer',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backgroundColor: configSettings.showRecordingControls ? '#f85c2c' : '#ccc',
-                transition: '.4s',
-                borderRadius: '34px',
-              }}>
-                <span style={{
-                  position: 'absolute',
-                  content: '""',
-                  height: '16px',
-                  width: '16px',
-                  left: configSettings.showRecordingControls ? '18px' : '2px',
-                  bottom: '2px',
-                  backgroundColor: 'white',
-                  transition: '.4s',
-                  borderRadius: '50%',
-                }}></span>
-              </span>
-            </label>
-          </div>
-          
-          <button 
-            style={{
-              backgroundColor: '#f85c2c',
-              color: 'white',
-              border: 'none',
-              borderRadius: '5px',
-              padding: '8px 12px',
-              fontSize: '14px',
+            <span style={{
+              position: 'absolute',
               cursor: 'pointer',
-              width: '100%',
-              marginTop: '10px',
-            }}
-            onClick={() => {
-              // Reset to prop default values
-              const defaultSettings = {
-                backgroundColor,
-                circleColor,
-                circleAnimationEnabled,
-                circleAnimationDuration,
-                showRecordingControls
-              };
-              
-              setConfigSettings(defaultSettings);
-              
-              // Notify parent components
-              if (onBackgroundColorChange) onBackgroundColorChange(backgroundColor);
-              if (onCircleColorChange) onCircleColorChange(circleColor);
-              if (onCircleAnimationEnabledChange) onCircleAnimationEnabledChange(circleAnimationEnabled);
-              if (onCircleAnimationDurationChange) onCircleAnimationDurationChange(circleAnimationDuration);
-              if (onShowRecordingControlsChange) onShowRecordingControlsChange(showRecordingControls);
-            }}
-          >
-            Reset to Default
-          </button>
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: configSettings.circleAnimationEnabled ? '#f85c2c' : '#ccc',
+              transition: '.4s',
+              borderRadius: '34px',
+            }}>
+              <span style={{
+                position: 'absolute',
+                content: '""',
+                height: '16px',
+                width: '16px',
+                left: configSettings.circleAnimationEnabled ? '18px' : '2px',
+                bottom: '2px',
+                backgroundColor: 'white',
+                transition: '.4s',
+                borderRadius: '50%',
+              }}></span>
+            </span>
+          </label>
         </div>
-      )}
-    </div>
-  );
+        
+        {configSettings.circleAnimationEnabled && (
+          <div style={configPanelStyles.group}>
+            <label style={configPanelStyles.label}>Animation Duration: {configSettings.circleAnimationDuration}ms</label>
+            <div style={configPanelStyles.rangeContainer}>
+              <input 
+                type="range" 
+                min="100" 
+                max="2000" 
+                step="50" 
+                value={configSettings.circleAnimationDuration} 
+                onChange={(e) => handleSliderChange('circleAnimationDuration', parseInt(e.target.value))}
+                style={configPanelStyles.rangeInput}
+              />
+            </div>
+          </div>
+        )}
+        
+        <div style={configPanelStyles.toggleContainer}>
+          <span>Recording Controls</span>
+          <label style={configPanelStyles.toggle}>
+            <input 
+              type="checkbox" 
+              checked={configSettings.showRecordingControls} 
+              onChange={() => handleToggleChange('showRecordingControls')}
+              style={configPanelStyles.toggleInput}
+            />
+            <span style={{
+              position: 'absolute',
+              cursor: 'pointer',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: configSettings.showRecordingControls ? '#f85c2c' : '#ccc',
+              transition: '.4s',
+              borderRadius: '34px',
+            }}>
+              <span style={{
+                position: 'absolute',
+                content: '""',
+                height: '16px',
+                width: '16px',
+                left: configSettings.showRecordingControls ? '18px' : '2px',
+                bottom: '2px',
+                backgroundColor: 'white',
+                transition: '.4s',
+                borderRadius: '50%',
+              }}></span>
+            </span>
+          </label>
+        </div>
+        
+        <button 
+          style={{
+            backgroundColor: '#f85c2c',
+            color: 'white',
+            border: 'none',
+            borderRadius: '5px',
+            padding: '8px 12px',
+            fontSize: '14px',
+            cursor: 'pointer',
+            width: '100%',
+            marginTop: '10px',
+          }}
+          onClick={() => {
+            // Reset to prop default values
+            const defaultSettings = {
+              backgroundColor,
+              circleColor,
+              circleAnimationEnabled,
+              circleAnimationDuration,
+              showRecordingControls
+            };
+            
+            setConfigSettings(defaultSettings);
+            
+            // Notify parent components
+            if (onBackgroundColorChange) onBackgroundColorChange(backgroundColor);
+            if (onCircleColorChange) onCircleColorChange(circleColor);
+            if (onCircleAnimationEnabledChange) onCircleAnimationEnabledChange(circleAnimationEnabled);
+            if (onCircleAnimationDurationChange) onCircleAnimationDurationChange(circleAnimationDuration);
+            if (onShowRecordingControlsChange) onShowRecordingControlsChange(showRecordingControls);
+          }}
+        >
+          Reset to Default
+        </button>
+      </div>
+    )}
+  </div>
+);
 };
 
 export default GrowingBall;
