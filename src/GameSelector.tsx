@@ -7,7 +7,8 @@ import CollapsingCircles from './games/CollapsingCircles';
 import CollapsingRotatingCircles, { 
   ExitStyle, 
   ParticleStyle,
-  CircleTheme
+  CircleTheme,
+  ShapeType // Add import for ShapeType
 } from './games/CollapsingRotatingCircles';
 import { 
   playGameStartSound, 
@@ -268,6 +269,9 @@ const GameSelector: React.FC = () => {
   const [maxBallSpeed, setMaxBallSpeed] = useState(8);
   const [shrinkCirclesOnDestroy, setShrinkCirclesOnDestroy] = useState(true);
   const [shrinkFactor, setShrinkFactor] = useState(0.8);
+
+  // Add state for shape type
+  const [shapeType, setShapeType] = useState<ShapeType>(ShapeType.CIRCLE);
 
   // Fonctions pour gérer les changements de style
   const handleExitStyleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -1043,6 +1047,8 @@ const GameSelector: React.FC = () => {
             ballGlowColor={ballGlowColor}
             ballGlowSize={ballGlowSize}
             ballTheme={ballTheme}
+            // Add shapeType prop
+            shapeType={shapeType}
           />
         );
 
@@ -2397,20 +2403,156 @@ const GameSelector: React.FC = () => {
   // Mettre à jour la fonction renderCollapsingRotatingCirclesSettings pour corriger l'erreur des deux attributs value
   const renderCollapsingRotatingCirclesSettings = () => {
     return (
-      <div className="game-settings">
+      <div className="circle-settings">
+        <h4>Paramètres des Cercles Rotatifs</h4>
+        
+        {/* Add shape selection control at the top */}
         <div className="control">
-          <label>Balle (rayon en pixels): {baseBallRadius}</label>
+          <label>Forme des cercles:</label>
+          <select 
+            className="style-select"
+            value={shapeType}
+            onChange={handleShapeTypeChange}
+            style={{ 
+              padding: "10px", 
+              fontSize: "16px", 
+              width: "100%",
+              marginBottom: "10px",
+              borderColor: shapeType !== ShapeType.CIRCLE ? '#4CAF50' : '#ccc',
+              backgroundColor: shapeType !== ShapeType.CIRCLE ? '#f0fff0' : '#fff' 
+            }}
+          >
+            <option value={ShapeType.CIRCLE}>Cercle</option>
+            <option value={ShapeType.TRIANGLE}>Triangle</option>
+            <option value={ShapeType.SQUARE}>Carré</option>
+            <option value={ShapeType.PENTAGON}>Pentagone</option>
+            <option value={ShapeType.HEXAGON}>Hexagone</option>
+            <option value={ShapeType.HEPTAGON}>Heptagone (7 côtés)</option>
+            <option value={ShapeType.OCTAGON}>Octogone (8 côtés)</option>
+            <option value={ShapeType.NONAGON}>Nonagone (9 côtés)</option>
+            <option value={ShapeType.DECAGON}>Décagone (10 côtés)</option>
+            <option value={ShapeType.HENDECAGON}>Hendécagone (11 côtés)</option>
+            <option value={ShapeType.DODECAGON}>Dodécagone (12 côtés)</option>
+          </select>
+          <div className="control-hint">
+            Choisissez la forme géométrique des "cercles" (polygone avec n côtés)
+          </div>
+        </div>
+        
+        {/* Existing circle theme selection */}
+        <div className="control">
+          <label>Thème de couleur:</label>
+          <select 
+            className="style-select"
+            value={circleTheme}
+            onChange={(e) => handleCircleThemeChange(e.target.value as CircleTheme)}
+          >
+            <option value={CircleTheme.DEFAULT}>Par défaut (couleurs aléatoires)</option>
+            <option value={CircleTheme.RAINBOW}>Arc-en-ciel</option>
+            <option value={CircleTheme.NEON}>Néon</option>
+            <option value={CircleTheme.LAVA}>Lave</option>
+            <option value={CircleTheme.WATER}>Eau</option>
+            <option value={CircleTheme.CUSTOM}>Couleur personnalisée</option>
+          </select>
+          <div className="control-hint">
+            Choisissez un thème de couleur pour les cercles
+          </div>
+        </div>
+        
+        {circleTheme === CircleTheme.CUSTOM && (
+          <div className="control">
+            <label>Couleur personnalisée:</label>
+            <input 
+              type="color" 
+              value={customCircleColor}
+              onChange={handleCustomCircleColorChange}
+              style={{ width: '100%', height: '40px', cursor: 'pointer' }}
+            />
+            <div className="control-hint">
+              Sélectionnez une couleur pour tous les cercles
+            </div>
+          </div>
+        )}
+        
+        {(circleTheme === CircleTheme.RAINBOW || circleTheme === CircleTheme.LAVA || circleTheme === CircleTheme.WATER) && (
+          <>
+            <div className="control toggle-control">
+              <label className="toggle-label">
+                Animer les couleurs:
+                <button 
+                  className={`toggle-button ${animateRainbow ? 'active' : ''}`}
+                  onClick={handleAnimateRainbowToggle}
+                >
+                  {animateRainbow ? 'ON' : 'OFF'}
+                </button>
+              </label>
+              <div className="control-hint">
+                Permet aux couleurs de changer avec le temps pour un effet plus dynamique
+              </div>
+            </div>
+            
+            {animateRainbow && (
+              <div className="control">
+                <label>Vitesse d'animation: {gradientSpeed.toFixed(1)}</label>
+                <input 
+                  type="range" 
+                  min="0.1" 
+                  max="3" 
+                  step="0.1" 
+                  value={gradientSpeed}
+                  onChange={handleGradientSpeedChange}
+                />
+                <div className="control-hint">
+                  Contrôle la vitesse de changement des couleurs
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        
+        {circleTheme === CircleTheme.NEON && (
+          <div className="control">
+            <label>Intensité de la lueur: {Math.round(glowIntensity * 100)}%</label>
+            <input 
+              type="range" 
+              min="0" 
+              max="1" 
+              step="0.05" 
+              value={glowIntensity}
+              onChange={handleGlowIntensityChange}
+            />
+            <div className="control-hint">
+              Ajuste l'intensité de l'effet lumineux néon
+            </div>
+          </div>
+        )}
+        
+        <div className="control">
+          <label>Épaisseur des cercles: {circleStrokeWidth}px</label>
           <input 
             type="range" 
             min="1" 
-            max="50" 
+            max="15" 
             step="1" 
-            value={baseBallRadius}
-            onChange={handleBaseBallRadiusChange}
+            value={circleStrokeWidth}
+            onChange={handleCircleStrokeWidthChange}
           />
           <div className="control-hint">
-            Ajuste la taille de la balle qui navigue entre les cercles
+            Ajuste l'épaisseur des traits des cercles
           </div>
+        </div>
+        
+        {/* Legacy option for backward compatibility */}
+        <div className="control toggle-control" style={{ display: 'none' }}>
+          <label className="toggle-label">
+            Cercles arc-en-ciel:
+            <button 
+              className={`toggle-button ${useRainbowCircles ? 'active' : ''}`}
+              onClick={handleUseRainbowCirclesToggle}
+            >
+              {useRainbowCircles ? 'ON' : 'OFF'}
+            </button>
+          </label>
         </div>
         
         <div className="control">
@@ -3559,6 +3701,11 @@ const GameSelector: React.FC = () => {
     const selectedTheme = e.target.value as 'default' | 'rainbow' | 'fire' | 'ice' | 'neon';
     console.log("Ball theme changed to:", selectedTheme); // Add logging for debugging
     setBallTheme(selectedTheme);
+  };
+  
+  // Add handler for shape type changes
+  const handleShapeTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setShapeType(e.target.value as ShapeType);
   };
   
   // Render function for the main component with sidebar layout

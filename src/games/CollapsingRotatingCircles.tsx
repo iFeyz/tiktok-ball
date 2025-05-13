@@ -57,6 +57,21 @@ export enum CircleTheme {
   CUSTOM = 'custom',
 }
 
+// Define and export shape types
+export enum ShapeType {
+  CIRCLE = "circle",
+  TRIANGLE = "triangle",
+  SQUARE = "square",
+  PENTAGON = "pentagon",
+  HEXAGON = "hexagon",
+  HEPTAGON = "heptagon",
+  OCTAGON = "octagon",
+  NONAGON = "nonagon",
+  DECAGON = "decagon",
+  HENDECAGON = "hendecagon",
+  DODECAGON = "dodecagon",
+}
+
 // Interface pour une particule d'effet visuel
 interface Particle {
   id: string;
@@ -168,6 +183,8 @@ interface CollapsingRotatingCirclesProps extends GameProps {
   ballGlowColor?: string; // Color of the ball glow
   ballGlowSize?: number; // Size of the ball glow (1-10)
   ballTheme?: 'default' | 'rainbow' | 'fire' | 'ice' | 'neon'; // Visual theme for balls
+  // Shape selection
+  shapeType?: ShapeType; // Shape type for the "circles" (polygon with N sides)
 }
 
 interface CollapsingRotatingCirclesState {
@@ -249,6 +266,134 @@ const formatRecordingTime = (milliseconds: number): string => {
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 };
 
+// Add a helper function to draw regular polygons
+const drawRegularPolygon = (
+  ctx: CanvasRenderingContext2D, 
+  centerX: number, 
+  centerY: number, 
+  radius: number, 
+  sides: number, 
+  rotation: number = 0
+) => {
+  if (sides < 3) return; // Minimum 3 sides for a polygon
+  
+  ctx.beginPath();
+  const angleStep = (Math.PI * 2) / sides;
+  
+  for (let i = 0; i < sides; i++) {
+    const angle = rotation + i * angleStep;
+    const x = centerX + radius * Math.cos(angle);
+    const y = centerY + radius * Math.sin(angle);
+    
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  
+  ctx.closePath();
+};
+
+// Helper function to get the number of sides for a given shape
+const getSidesForShape = (shape: ShapeType): number => {
+  switch (shape) {
+    case ShapeType.CIRCLE: return 0; // Special case for circle
+    case ShapeType.TRIANGLE: return 3;
+    case ShapeType.SQUARE: return 4;
+    case ShapeType.PENTAGON: return 5;
+    case ShapeType.HEXAGON: return 6;
+    case ShapeType.HEPTAGON: return 7;
+    case ShapeType.OCTAGON: return 8;
+    case ShapeType.NONAGON: return 9;
+    case ShapeType.DECAGON: return 10;
+    case ShapeType.HENDECAGON: return 11;
+    case ShapeType.DODECAGON: return 12;
+    default: return 0; // Default to circle
+  }
+};
+
+// Add a helper function to check if a point is inside a polygon
+const isPointInPolygon = (
+  centerX: number, 
+  centerY: number, 
+  radius: number, 
+  sides: number, 
+  rotation: number,
+  pointX: number, 
+  pointY: number
+): boolean => {
+  if (sides < 3) {
+    // For circles, use simple distance check
+    const dx = pointX - centerX;
+    const dy = pointY - centerY;
+    return Math.sqrt(dx * dx + dy * dy) <= radius;
+  }
+  
+  // For polygons, create the vertices and check if the point is inside
+  const angleStep = (Math.PI * 2) / sides;
+  const vertices: {x: number, y: number}[] = [];
+  
+  for (let i = 0; i < sides; i++) {
+    const angle = rotation + i * angleStep;
+    vertices.push({
+      x: centerX + radius * Math.cos(angle),
+      y: centerY + radius * Math.sin(angle)
+    });
+  }
+  
+  // Ray casting algorithm to determine if the point is inside the polygon
+  let inside = false;
+  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+    const xi = vertices[i].x;
+    const yi = vertices[i].y;
+    const xj = vertices[j].x;
+    const yj = vertices[j].y;
+    
+    const intersect = ((yi > pointY) !== (yj > pointY)) &&
+      (pointX < (xj - xi) * (pointY - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  
+  return inside;
+};
+
+// Function to calculate distance from point to line segment
+const distanceToLineSegment = (
+  px: number, py: number,   // Point coordinates
+  x1: number, y1: number,   // Line segment start
+  x2: number, y2: number    // Line segment end
+): number => {
+  const A = px - x1;
+  const B = py - y1;
+  const C = x2 - x1;
+  const D = y2 - y1;
+  
+  const dot = A * C + B * D;
+  const len_sq = C * C + D * D;
+  let param = -1;
+  
+  if (len_sq !== 0) param = dot / len_sq;
+  
+  let xx, yy;
+  
+  if (param < 0) {
+    xx = x1;
+    yy = y1;
+  } else if (param > 1) {
+    xx = x2;
+    yy = y2;
+  } else {
+    xx = x1 + param * C;
+    yy = y1 + param * D;
+  }
+  
+  const dx = px - xx;
+  const dy = py - yy;
+  
+  return Math.sqrt(dx * dx + dy * dy);
+};
+
 const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({ 
   isPlaying, 
   onGameEnd,
@@ -317,6 +462,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   ballGlowColor = '#ff0000',
   ballGlowSize = 5,
   ballTheme = 'default',
+  shapeType = ShapeType.CIRCLE,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
@@ -961,7 +1107,9 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
 
           // Vérifier si la balle est près du cercle
           const distDiff = Math.abs(ballDistFromCenter - circle.radius);
+          const sides = getSidesForShape(shapeType);
           
+          // Collision detection logic based on shape
           if (distDiff < ball.radius) {
             // Calculer l'angle de la balle par rapport au centre
             const ballAngle = Math.atan2(ball.position.y - centerY, ball.position.x - centerX);
@@ -971,6 +1119,34 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
             // Calculer les limites de la "porte de sortie"
             const exitStart = circle.rotation;
             const exitEnd = (circle.rotation + exitSizeRad) % (Math.PI * 2);
+            
+            // Add additional checks for polygons
+            let isNearEdge = true;
+            if (sides > 0) {
+              // For polygons, check if the ball is near an edge
+              const angleStep = (Math.PI * 2) / sides;
+              let nearestEdgeDistance = Infinity;
+              
+              for (let i = 0; i < sides; i++) {
+                const angle1 = circle.rotation + i * angleStep;
+                const angle2 = circle.rotation + ((i + 1) % sides) * angleStep;
+                
+                const edgeX1 = centerX + circle.radius * Math.cos(angle1);
+                const edgeY1 = centerY + circle.radius * Math.sin(angle1);
+                const edgeX2 = centerX + circle.radius * Math.cos(angle2);
+                const edgeY2 = centerY + circle.radius * Math.sin(angle2);
+                
+                // Calculate distance from ball to edge line segment
+                const edgeDist = distanceToLineSegment(
+                  ball.position.x, ball.position.y,
+                  edgeX1, edgeY1, edgeX2, edgeY2
+                );
+                
+                nearestEdgeDistance = Math.min(nearestEdgeDistance, edgeDist);
+              }
+              
+              isNearEdge = nearestEdgeDistance <= ball.radius * 1.5;
+            }
             
             // Vérifier si la balle est dans la "porte de sortie" avec une marge supplémentaire pour faciliter le passage
             // Ajouter une petite marge (10% de la taille de la porte) pour rendre la porte plus facile à traverser
@@ -991,7 +1167,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
             ) > 0;
             
             // Si la balle est dans la porte ET se dirige vers l'extérieur, la laisser passer
-            if (isInExit && movingOutward) {
+            if (isInExit && movingOutward && isNearEdge) {
               // La balle s'échappe par la porte !
               if (ballDistFromCenter > circle.radius - ball.radius / 2) { // Moins strict sur la condition de distance
                 // Marquer le cercle comme détruit
@@ -1119,7 +1295,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                   });
                 }
               }
-            } else if (!isInExit || !movingOutward) {
+            } else if ((!isInExit || !movingOutward) && isNearEdge) {
               // La balle frappe le cercle (pas la porte), elle rebondit
               const fromCenter = {
                 x: ball.position.x - centerX,
@@ -1264,33 +1440,92 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
           }
         }
         
-        // Dessiner l'arc principal (cercle moins la porte de sortie)
-        ctx.beginPath();
-        // Assurer que les deux arcs s'alignent correctement
-        const fullCircle = Math.PI * 2;
-        ctx.arc(
-          centerX, 
-          centerY, 
-          circle.radius, 
-          circle.rotation + exitSizeRad, // Début de l'arc après la porte
-          circle.rotation + fullCircle, // Tour complet
-          false
-        );
-        ctx.strokeStyle = circleColor;
-        ctx.lineWidth = circleStrokeWidth; // Use the custom stroke width
-        ctx.stroke();
+        // Get the number of sides for the current shape
+        const sides = getSidesForShape(shapeType);
         
-        // Marquer visuellement la porte de sortie selon le style choisi
-        if (exitStyle !== ExitStyle.TRANSPARENT) {
+        if (sides === 0) {
+          // Draw circle (original code)
           ctx.beginPath();
+          const fullCircle = Math.PI * 2;
           ctx.arc(
+            centerX, 
+            centerY, 
+            circle.radius, 
+            circle.rotation + exitSizeRad, // Début de l'arc après la porte
+            circle.rotation + fullCircle, // Tour complet
+            false
+          );
+          ctx.strokeStyle = circleColor;
+          ctx.lineWidth = circleStrokeWidth; // Use the custom stroke width
+          ctx.stroke();
+        } else {
+          // Draw polygon
+          ctx.save();
+          drawRegularPolygon(
+            ctx,
             centerX,
             centerY,
             circle.radius,
-            circle.rotation, // Début de la porte
-            circle.rotation + exitSizeRad, // Fin de la porte
-            false
+            sides,
+            circle.rotation + exitSizeRad
           );
+          ctx.strokeStyle = circleColor;
+          ctx.lineWidth = circleStrokeWidth;
+          ctx.stroke();
+          ctx.restore();
+        }
+        
+        // Marquer visuellement la porte de sortie selon le style choisi
+        if (exitStyle !== ExitStyle.TRANSPARENT) {
+          if (sides === 0) {
+            // Exit for circle (original code)
+            ctx.beginPath();
+            ctx.arc(
+              centerX,
+              centerY,
+              circle.radius,
+              circle.rotation, // Début de la porte
+              circle.rotation + exitSizeRad, // Fin de la porte
+              false
+            );
+          } else {
+            // Create exit for polygon
+            ctx.beginPath();
+            
+            // Draw the exit as a wedge from center
+            ctx.moveTo(centerX, centerY);
+            const startAngle = circle.rotation;
+            const endAngle = circle.rotation + exitSizeRad;
+            const midPoint = startAngle + (exitSizeRad / 2);
+            
+            // Calculate points for the exit arc
+            const x1 = centerX + circle.radius * Math.cos(startAngle);
+            const y1 = centerY + circle.radius * Math.sin(startAngle);
+            const x2 = centerX + circle.radius * Math.cos(endAngle);
+            const y2 = centerY + circle.radius * Math.sin(endAngle);
+            
+            // Draw the wedge
+            ctx.moveTo(centerX, centerY);
+            ctx.lineTo(x1, y1);
+            
+            // For non-circle shapes, use a straight line for small exit sizes
+            // and an arc approximation for larger ones
+            if (exitSizeRad < Math.PI / 4) {
+              ctx.lineTo(x2, y2);
+            } else {
+              // For larger exits, add intermediate points to create a curve
+              const steps = Math.ceil(exitSizeRad * 5 / Math.PI); // More steps for larger arcs
+              for (let i = 1; i < steps; i++) {
+                const angle = startAngle + (exitSizeRad * i / steps);
+                const x = centerX + circle.radius * Math.cos(angle);
+                const y = centerY + circle.radius * Math.sin(angle);
+                ctx.lineTo(x, y);
+              }
+              ctx.lineTo(x2, y2);
+            }
+            
+            ctx.closePath();
+          }
           
           // Appliquer un style différent selon l'option choisie
           switch(exitStyle) {
