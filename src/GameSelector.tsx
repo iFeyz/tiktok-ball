@@ -2591,7 +2591,7 @@ const GameSelector: React.FC = () => {
             type="range" 
             min="1" 
             max="100" 
-            step="5" 
+            step="1" 
             value={circleGap}
             onChange={handleCircleGapChange}
           />
