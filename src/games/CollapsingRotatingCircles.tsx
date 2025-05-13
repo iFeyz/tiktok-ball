@@ -47,6 +47,16 @@ export enum ParticleStyle {
   CONFETTI = "confetti",     // Style confetti multicolore
 }
 
+// Define and export circle themes
+export enum CircleTheme {
+  DEFAULT = 'default',
+  RAINBOW = 'rainbow',
+  NEON = 'neon',
+  LAVA = 'lava',
+  WATER = 'water',
+  CUSTOM = 'custom',
+}
+
 // Interface pour une particule d'effet visuel
 interface Particle {
   id: string;
@@ -79,6 +89,17 @@ interface EnhancedBall extends Ball {
   imageIndex?: number;
   growing?: boolean;
   growthRate?: number;
+  // New ball customization properties
+  customColor?: string;
+  hasTrail?: boolean;
+  trailColor?: string;
+  trailLength?: number;
+  strokeWidth?: number;
+  strokeColor?: string;
+  hasGlow?: boolean;
+  glowColor?: string;
+  glowSize?: number;
+  theme?: 'default' | 'rainbow' | 'fire' | 'ice' | 'neon';
 }
 
 interface CollapsingRotatingCirclesProps extends GameProps {
@@ -127,6 +148,26 @@ interface CollapsingRotatingCirclesProps extends GameProps {
   midiVolume?: number; // Volume for MIDI notes (0-1)
   playMusicOnDoorDestroy?: boolean; // Whether to play music/sound when door is destroyed
   doorDestroyMusicVolume?: number; // Volume for door destroy music/sound (0-1)
+  // New properties for rainbow circles and custom stroke
+  useRainbowCircles?: boolean; // Enable rainbow colors for circles
+  circleStrokeWidth?: number; // Custom stroke width for circles
+  animateRainbow?: boolean; // Whether to animate the rainbow effect over time
+  // New theme properties
+  circleTheme?: CircleTheme; // Theme for circles (rainbow, neon, lava, water, etc.)
+  customCircleColor?: string; // Custom color for circles when using CUSTOM theme
+  glowIntensity?: number; // Glow intensity for themes that support it (0-1)
+  gradientSpeed?: number; // Speed of gradient animations
+  // New ball customization properties
+  customBallColor?: string; // Custom color for all balls
+  ballHasTrail?: boolean; // Whether balls have a trailing effect
+  ballTrailColor?: string; // Color for the ball trail
+  ballTrailLength?: number; // Length of the ball trail (1-20)
+  ballStrokeWidth?: number; // Width of ball outline
+  ballStrokeColor?: string; // Color of ball outline
+  ballHasGlow?: boolean; // Whether balls have a glow effect
+  ballGlowColor?: string; // Color of the ball glow
+  ballGlowSize?: number; // Size of the ball glow (1-10)
+  ballTheme?: 'default' | 'rainbow' | 'fire' | 'ice' | 'neon'; // Visual theme for balls
 }
 
 interface CollapsingRotatingCirclesState {
@@ -256,6 +297,26 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   midiVolume = 0.7,
   playMusicOnDoorDestroy = true,
   doorDestroyMusicVolume = 0.5,
+  // New properties for rainbow circles and custom stroke
+  useRainbowCircles = false,
+  circleStrokeWidth = 3,
+  animateRainbow = true,
+  // New theme properties
+  circleTheme = CircleTheme.DEFAULT,
+  customCircleColor,
+  glowIntensity = 0.5,
+  gradientSpeed = 0.01,
+  // New ball customization properties
+  customBallColor,
+  ballHasTrail = false,
+  ballTrailColor = '#ffffff',
+  ballTrailLength = 10,
+  ballStrokeWidth = 2,
+  ballStrokeColor = '#000000',
+  ballHasGlow = false,
+  ballGlowColor = '#ff0000',
+  ballGlowSize = 5,
+  ballTheme = 'default',
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
@@ -317,27 +378,105 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
   const createDestructionParticles = (centerX: number, centerY: number, circleRadius: number, circleColor: string) => {
     if (!effectsEnabled) return [];
     
-    const particles: Particle[] = [];
+    let particleCount = 0;
+    let particleColors: string[] = [];
     
-    // Calculer le nombre de particules en fonction du style
-    let particleCount = Math.min(150, Math.max(50, Math.floor(circleRadius)));
-    
-    // Appliquer des modifications en fonction du style choisi
-    switch(particleStyle) {
-      case ParticleStyle.MINIMAL:
-        particleCount = Math.floor(particleCount * 0.3); // Beaucoup moins de particules
-        break;
-      case ParticleStyle.EXPLOSION:
-        particleCount = Math.min(200, Math.floor(particleCount * 1.5)); // Plus de particules
-        break;
-      case ParticleStyle.CONFETTI:
-        particleCount = Math.min(300, Math.floor(particleCount * 1.8)); // Encore plus de particules pour l'effet confetti
-        break;
+    // Déterminer le style des particules
+    switch (particleStyle) {
       case ParticleStyle.SPARKLE:
-        particleCount = Math.min(180, Math.floor(particleCount * 1.2)); // Légèrement plus de particules
+        particleCount = 25; // Plus de particules pour l'effet d'étincelles
+        // Couleurs vives pour les étincelles
+        particleColors = ['#ffff00', '#ffffff', '#ffcc00', '#ffffaa'];
+        break;
+        
+      case ParticleStyle.EXPLOSION:
+        particleCount = 35; // Beaucoup de particules pour une explosion
+        // Couleurs rouge/orange pour l'explosion
+        particleColors = ['#ff4400', '#ff8800', '#ffbb00', '#ffff00', '#ffffff'];
+        break;
+        
+      case ParticleStyle.MINIMAL:
+        particleCount = 10; // Très peu de particules pour un effet minimal
+        // Utiliser des couleurs monochromes
+        particleColors = ['#ffffff', '#eeeeee', '#dddddd'];
+        break;
+        
+      case ParticleStyle.CONFETTI:
+        particleCount = 30; // Nombreuses particules pour l'effet confetti
+        // Couleurs vives et variées comme des confettis
+        particleColors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff'];
+        break;
+        
+      case ParticleStyle.STANDARD:
+      default:
+        particleCount = 20; // Nombre standard de particules
+        // Use colors based on the circle theme if appropriate
+        if (effectiveCircleTheme === CircleTheme.RAINBOW) {
+          // Rainbow colors for particles
+          particleColors = Array.from({ length: 6 }, (_, i) => {
+            const hue = (i * 60) % 360;
+            return `hsl(${hue}, 100%, 50%)`;
+          });
+        } else if (effectiveCircleTheme === CircleTheme.NEON) {
+          // Neon colors with high lightness
+          particleColors = Array.from({ length: 6 }, (_, i) => {
+            const hue = (i * 60) % 360;
+            const lightness = 60 + (glowIntensity * 20);
+            return `hsl(${hue}, 100%, ${lightness}%)`;
+          });
+        } else if (effectiveCircleTheme === CircleTheme.LAVA) {
+          // Lava theme colors (red to yellow)
+          particleColors = Array.from({ length: 6 }, (_, i) => {
+            const hue = 10 + (i * 10); // Range from 10 (red) to 60 (yellow)
+            return `hsl(${hue}, 100%, 50%)`;
+          });
+        } else if (effectiveCircleTheme === CircleTheme.WATER) {
+          // Water theme colors (blues and cyans)
+          particleColors = Array.from({ length: 6 }, (_, i) => {
+            const hue = 180 + (i * 10); // Range from 180 (cyan) to 240 (blue)
+            return `hsl(${hue}, 85%, 55%)`;
+          });
+        } else if (effectiveCircleTheme === CircleTheme.CUSTOM && customCircleColor) {
+          // Use the custom color + variants
+          const r = parseInt(customCircleColor.substring(1, 3), 16);
+          const g = parseInt(customCircleColor.substring(3, 5), 16);
+          const b = parseInt(customCircleColor.substring(5, 7), 16);
+          
+          particleColors = [
+            customCircleColor, 
+            `rgb(${Math.min(r + 40, 255)}, ${Math.min(g + 40, 255)}, ${Math.min(b + 40, 255)})`, // Lighter
+            `rgb(${Math.max(r - 40, 0)}, ${Math.max(g - 40, 0)}, ${Math.max(b - 40, 0)})`, // Darker
+            '#ffffff'
+          ];
+        } else {
+          // Default: derived from the circle's color for consistency
+          particleColors = [circleColor];
+          // Add white and a lighter shade for visual interest
+          particleColors.push('#ffffff');
+          
+          // Créer une version plus claire de la couleur du cercle
+          if (circleColor.startsWith('#')) {
+            const r = parseInt(circleColor.substr(1, 2), 16);
+            const g = parseInt(circleColor.substr(3, 2), 16);
+            const b = parseInt(circleColor.substr(5, 2), 16);
+            
+            // Éclaircir la couleur en ajoutant de la luminosité
+            const lighterColor = `rgb(${Math.min(r + 50, 255)}, ${Math.min(g + 50, 255)}, ${Math.min(b + 50, 255)})`;
+            particleColors.push(lighterColor);
+          }
+        }
         break;
     }
     
+    // Si des couleurs personnalisées sont fournies, les utiliser
+    if (particleColors.length > 0) {
+      particleColors = particleColors;
+    }
+    
+    // Créer des particules avec les couleurs et propriétés définies
+    const particles: Particle[] = [];
+    
+    // Générer les particules
     for (let i = 0; i < particleCount; i++) {
       // Angle aléatoire pour diffuser les particules dans toutes les directions
       const angle = Math.random() * Math.PI * 2;
@@ -359,85 +498,94 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       let particleColor = '';
       let lifetime = 60 + Math.random() * 120;
       
-      // Appliquer des modifications en fonction du style choisi
-      switch(particleStyle) {
-        case ParticleStyle.STANDARD:
-          // Modifier légèrement la couleur du cercle pour chaque particule
-          const r = parseInt(circleColor.substr(1, 2), 16);
-          const g = parseInt(circleColor.substr(3, 2), 16);
-          const b = parseInt(circleColor.substr(5, 2), 16);
-          
-          // Ajuster légèrement les couleurs
-          const brightness = 0.8 + Math.random() * 0.4;
-          const newR = Math.min(255, Math.max(0, Math.floor(r * brightness)));
-          const newG = Math.min(255, Math.max(0, Math.floor(g * brightness)));
-          const newB = Math.min(255, Math.max(0, Math.floor(b * brightness)));
-          
-          // Convertir en couleur hexadécimale
-          particleColor = `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`;
-          break;
-          
-        case ParticleStyle.SPARKLE:
-          // Couleurs brillantes pour les étincelles
-          const hue = Math.random() * 60 + 30; // Tons jaune-orange pour l'effet d'étincelle
-          const sat = 80 + Math.random() * 20; // Haute saturation
-          const light = 60 + Math.random() * 30; // Haute luminosité
-          particleColor = `hsl(${hue}, ${sat}%, ${light}%)`;
-          
-          // Particules plus petites et plus rapides
-          size = 0.5 + Math.random() * 3;
-          speedMultiplier = 1 + Math.random() * 3;
-          vx = Math.cos(angle) * speedMultiplier;
-          vy = Math.sin(angle) * speedMultiplier;
-          
-          // Durée de vie plus courte
-          lifetime = 30 + Math.random() * 70;
-          break;
-          
-        case ParticleStyle.EXPLOSION:
-          // Couleurs chaudes pour l'explosion
-          const explosionHue = Math.random() * 30; // Rouge à orange
-          particleColor = `hsl(${explosionHue}, 100%, ${50 + Math.random() * 30}%)`;
-          
-          // Particules plus rapides
-          speedMultiplier = 2 + Math.random() * 4;
-          vx = Math.cos(angle) * speedMultiplier;
-          vy = Math.sin(angle) * speedMultiplier;
-          
-          // Certaines particules plus grosses
-          size = Math.random() < 0.3 ? 3 + Math.random() * 7 : 1 + Math.random() * 4;
-          
-          // Durée de vie variable
-          lifetime = 40 + Math.random() * 100;
-          break;
-          
-        case ParticleStyle.MINIMAL:
-          // Couleur plus simple, basée sur celle du cercle mais plus uniforme
-          particleColor = circleColor;
-          
-          // Particules plus petites
-          size = 0.5 + Math.random() * 2;
-          
-          // Durée de vie plus courte
-          lifetime = 30 + Math.random() * 50;
-          break;
-          
-        case ParticleStyle.CONFETTI:
-          // Couleurs aléatoires vives pour les confettis
-          const confettiHue = Math.random() * 360; // Toutes les couleurs
-          particleColor = `hsl(${confettiHue}, 100%, 70%)`;
-          
-          // Forme plus rectangulaire (simulée avec des particules)
-          size = 2 + Math.random() * 4;
-          
-          // Mouvement plus flottant
-          speedMultiplier = 0.3 + Math.random() * 1.5;
-          vx = Math.cos(angle) * speedMultiplier;
-          vy = Math.sin(angle) * speedMultiplier - 0.5; // Flottement vers le haut
-          
-          // Durée de vie plus longue
-          lifetime = 80 + Math.random() * 160;
-          break;
+      // For rainbow circles, create rainbow particles
+      if (useRainbowCircles && particleStyle !== ParticleStyle.CONFETTI) {
+        // Create particles with colors in the same rainbow spectrum
+        const baseHue = Math.random() * 360; // Random hue across the spectrum
+        const saturation = 90 + Math.random() * 10; // High saturation
+        const lightness = 40 + Math.random() * 50; // Varied lightness
+        particleColor = `hsl(${baseHue}, ${saturation}%, ${lightness}%)`;
+      } else {
+        // Appliquer des modifications en fonction du style choisi
+        switch(particleStyle) {
+          case ParticleStyle.STANDARD:
+            // Modifier légèrement la couleur du cercle pour chaque particule
+            const r = parseInt(circleColor.substr(1, 2), 16);
+            const g = parseInt(circleColor.substr(3, 2), 16);
+            const b = parseInt(circleColor.substr(5, 2), 16);
+            
+            // Ajuster légèrement les couleurs
+            const brightness = 0.8 + Math.random() * 0.4;
+            const newR = Math.min(255, Math.max(0, Math.floor(r * brightness)));
+            const newG = Math.min(255, Math.max(0, Math.floor(g * brightness)));
+            const newB = Math.min(255, Math.max(0, Math.floor(b * brightness)));
+            
+            // Convertir en couleur hexadécimale
+            particleColor = `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`;
+            break;
+            
+          case ParticleStyle.SPARKLE:
+            // Couleurs brillantes pour les étincelles
+            const hue = Math.random() * 60 + 30; // Tons jaune-orange pour l'effet d'étincelle
+            const sat = 80 + Math.random() * 20; // Haute saturation
+            const light = 60 + Math.random() * 30; // Haute luminosité
+            particleColor = `hsl(${hue}, ${sat}%, ${light}%)`;
+            
+            // Particules plus petites et plus rapides
+            size = 0.5 + Math.random() * 3;
+            speedMultiplier = 1 + Math.random() * 3;
+            vx = Math.cos(angle) * speedMultiplier;
+            vy = Math.sin(angle) * speedMultiplier;
+            
+            // Durée de vie plus courte
+            lifetime = 30 + Math.random() * 70;
+            break;
+            
+          case ParticleStyle.EXPLOSION:
+            // Couleurs chaudes pour l'explosion
+            const explosionHue = Math.random() * 30; // Rouge à orange
+            particleColor = `hsl(${explosionHue}, 100%, ${50 + Math.random() * 30}%)`;
+            
+            // Particules plus rapides
+            speedMultiplier = 2 + Math.random() * 4;
+            vx = Math.cos(angle) * speedMultiplier;
+            vy = Math.sin(angle) * speedMultiplier;
+            
+            // Certaines particules plus grosses
+            size = Math.random() < 0.3 ? 3 + Math.random() * 7 : 1 + Math.random() * 4;
+            
+            // Durée de vie variable
+            lifetime = 40 + Math.random() * 100;
+            break;
+            
+          case ParticleStyle.MINIMAL:
+            // Couleur plus simple, basée sur celle du cercle mais plus uniforme
+            particleColor = circleColor;
+            
+            // Particules plus petites
+            size = 0.5 + Math.random() * 2;
+            
+            // Durée de vie plus courte
+            lifetime = 30 + Math.random() * 50;
+            break;
+            
+          case ParticleStyle.CONFETTI:
+            // Couleurs aléatoires vives pour les confettis
+            const confettiHue = Math.random() * 360; // Toutes les couleurs
+            particleColor = `hsl(${confettiHue}, 100%, 70%)`;
+            
+            // Forme plus rectangulaire (simulée avec des particules)
+            size = 2 + Math.random() * 4;
+            
+            // Mouvement plus flottant
+            speedMultiplier = 0.3 + Math.random() * 1.5;
+            vx = Math.cos(angle) * speedMultiplier;
+            vy = Math.sin(angle) * speedMultiplier - 0.5; // Flottement vers le haut
+            
+            // Durée de vie plus longue
+            lifetime = 80 + Math.random() * 160;
+            break;
+        }
       }
       
       particles.push({
@@ -468,6 +616,21 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
 
+    // Debug logging for ball theme
+    console.log("Initializing game with ball theme:", ballTheme);
+    console.log("Ball customization options:", {
+      customBallColor,
+      ballHasTrail,
+      ballTrailColor,
+      ballTrailLength,
+      ballStrokeWidth,
+      ballStrokeColor,
+      ballHasGlow,
+      ballGlowColor,
+      ballGlowSize,
+      ballTheme
+    });
+
     // Créer les balles avec images personnalisées si activées
     const newBalls: EnhancedBall[] = [];
     for (let i = 0; i < ballCount; i++) {
@@ -495,6 +658,10 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         }
       }
 
+      // Log theme being applied to this ball
+      console.log(`Creating ball ${i+1} with theme: ${ballTheme}`);
+
+      // Create the ball with all customization properties
       newBalls.push({
         id: generateId(),
         position: { x: centerX, y: centerY },
@@ -507,7 +674,17 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         image: ballImage,
         imageIndex: imageIndex,
         growing: growing,
-        growthRate: growthRate
+        growthRate: growthRate,
+        customColor: customBallColor,
+        hasTrail: ballHasTrail,
+        trailColor: ballTrailColor,
+        trailLength: ballTrailLength,
+        strokeWidth: ballStrokeWidth,
+        strokeColor: ballStrokeColor,
+        hasGlow: ballHasGlow,
+        glowColor: ballGlowColor,
+        glowSize: ballGlowSize,
+        theme: ballTheme // Explicitly set the ball theme
       });
     }
 
@@ -564,7 +741,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
     setTimeout(() => {
       playGameStartSound();
     }, 100);
-  }, [ballSpeed, initialCircleCount, circleGap, exitSize, rotationSpeed, ballCount, baseBallRadius, progressiveRotationOffset, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate]);
+  }, [ballSpeed, initialCircleCount, circleGap, exitSize, rotationSpeed, ballCount, baseBallRadius, progressiveRotationOffset, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate, customBallColor, ballHasTrail, ballTrailColor, ballTrailLength, ballStrokeWidth, ballStrokeColor, ballHasGlow, ballGlowColor, ballGlowSize, ballTheme]);
 
   useEffect(() => {
     if (isPlaying) {
@@ -872,9 +1049,9 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
                       const audioElement = new Audio(URL.createObjectURL(customExitSound));
                       audioElement.volume = customExitSoundVolume;
                       audioElement.play().catch(e => console.error("Erreur lors de la lecture du son personnalisé:", e));
-                } else {
+                    } else {
                       // Standard sound
-                  playRandomSound();
+                      playRandomSound();
                     }
                   }
                 }
@@ -1010,7 +1187,82 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         if (circle.isDestroyed) return;
         
         // Couleur variable pour l'effet de flash
-        const circleColor = circle.isFlashing ? 'rgba(255, 255, 255, 0.9)' : circle.color;
+        let circleColor = circle.isFlashing ? 'rgba(255, 255, 255, 0.9)' : circle.color;
+        
+        // Create color based on selected theme
+        const effectiveCircleTheme = useRainbowCircles ? CircleTheme.RAINBOW : circleTheme;
+        if (!circle.isFlashing) {
+          switch (effectiveCircleTheme) {
+            case CircleTheme.RAINBOW:
+              if (animateRainbow) {
+                // Animated rainbow based on time and circle index
+                const timeOffset = performance.now() / 1000; // Time in seconds
+                const speed = gradientSpeed * 50;
+                const hue = ((circle.circleIndex * 30) + timeOffset * speed) % 360;
+                circleColor = `hsl(${hue}, 100%, 50%)`;
+              } else {
+                // Static rainbow based on circle index
+                const hue = (circle.circleIndex * 60) % 360;
+                circleColor = `hsl(${hue}, 100%, 50%)`;
+              }
+              break;
+              
+            case CircleTheme.NEON:
+              // Bright neon colors with glow effect
+              const neonHue = (circle.circleIndex * 40) % 360;
+              // Higher lightness for neon effect
+              const lightness = 50 + (glowIntensity * 20);
+              circleColor = `hsl(${neonHue}, 100%, ${lightness}%)`;
+              break;
+              
+            case CircleTheme.LAVA:
+              // Lava theme uses red to yellow gradient
+              let lavaHue;
+              if (animateRainbow) {
+                // Animate the lava colors
+                const timeOffset = performance.now() / 1000;
+                const speed = gradientSpeed * 30;
+                // Fluctuate between 0 and 60 (red to yellow-orange)
+                const fluctuation = Math.sin(timeOffset * speed + circle.circleIndex) * 30;
+                lavaHue = 10 + fluctuation; // Base of red (10) with fluctuation
+              } else {
+                // Static lava colors
+                lavaHue = 10 + (circle.circleIndex * 5) % 60; // Range from red(0) to yellow(60)
+              }
+              circleColor = `hsl(${lavaHue}, 100%, 50%)`;
+              break;
+              
+            case CircleTheme.WATER:
+              // Water theme uses blue to cyan gradient
+              let waterHue;
+              if (animateRainbow) {
+                // Animate the water colors
+                const timeOffset = performance.now() / 1000;
+                const speed = gradientSpeed * 20;
+                // Fluctuate colors in the blue range
+                const fluctuation = Math.sin(timeOffset * speed + circle.circleIndex) * 30;
+                waterHue = 200 + fluctuation; // Base of blue (200) with fluctuation
+              } else {
+                // Static water colors
+                waterHue = 180 + (circle.circleIndex * 5) % 60; // Range in blue-cyan (180-240)
+              }
+              circleColor = `hsl(${waterHue}, 85%, 55%)`;
+              break;
+              
+            case CircleTheme.CUSTOM:
+              // Use the custom color for all circles
+              if (customCircleColor) {
+                circleColor = customCircleColor;
+              }
+              break;
+              
+            case CircleTheme.DEFAULT:
+            default:
+              // Use default random colors
+              // No change needed as circleColor is already set
+              break;
+          }
+        }
         
         // Dessiner l'arc principal (cercle moins la porte de sortie)
         ctx.beginPath();
@@ -1025,7 +1277,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
           false
         );
         ctx.strokeStyle = circleColor;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = circleStrokeWidth; // Use the custom stroke width
         ctx.stroke();
         
         // Marquer visuellement la porte de sortie selon le style choisi
@@ -1044,12 +1296,26 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
           switch(exitStyle) {
             case ExitStyle.STANDARD:
               ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)'; // Style standard
-              ctx.lineWidth = 5;
+              ctx.lineWidth = circleStrokeWidth + 2; // Slightly thicker for the exit
               break;
               
             case ExitStyle.INVERTED:
               // Inverser la couleur du cercle
-              if (circle.color.startsWith('#')) {
+              if (effectiveCircleTheme === CircleTheme.RAINBOW || effectiveCircleTheme === CircleTheme.NEON || 
+                  effectiveCircleTheme === CircleTheme.LAVA || effectiveCircleTheme === CircleTheme.WATER) {
+                // For themed circles, use a complementary color for the exit
+                if (circleColor.startsWith('hsl')) {
+                  const hueMatch = circleColor.match(/hsl\((\d+)/);
+                  if (hueMatch) {
+                    const hue = (parseInt(hueMatch[1]) + 180) % 360; // Complementary color
+                    ctx.strokeStyle = `hsl(${hue}, 100%, 50%)`;
+                  } else {
+                    ctx.strokeStyle = '#ffffff'; // Fallback
+                  }
+                } else {
+                  ctx.strokeStyle = '#ffffff'; // Fallback
+                }
+              } else if (circle.color.startsWith('#')) {
                 const r = parseInt(circle.color.substr(1, 2), 16);
                 const g = parseInt(circle.color.substr(3, 2), 16);
                 const b = parseInt(circle.color.substr(5, 2), 16);
@@ -1060,7 +1326,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
               } else {
                 ctx.strokeStyle = '#ffffff'; // Fallback
               }
-              ctx.lineWidth = 5;
+              ctx.lineWidth = circleStrokeWidth + 2;
               break;
               
             case ExitStyle.GLOWING:
@@ -1076,7 +1342,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
               gradient.addColorStop(1, 'rgba(255, 255, 255, 0.3)');
               
               ctx.strokeStyle = gradient;
-              ctx.lineWidth = 8; // Plus large pour l'effet brillant
+              ctx.lineWidth = circleStrokeWidth + 3; // Plus large pour l'effet brillant
               
               // Ajouter un halo autour de la porte
               ctx.shadowColor = 'white';
@@ -1099,7 +1365,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
               rainbow.addColorStop(1, 'magenta');
               
               ctx.strokeStyle = rainbow;
-              ctx.lineWidth = 5;
+              ctx.lineWidth = circleStrokeWidth + 2;
               break;
           }
           
@@ -1135,6 +1401,41 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
 
       // Dessiner les balles
       currentBalls.forEach(ball => {
+        // If the ball has a trail and trail is enabled
+        if (ball.hasTrail && ballHasTrail) {
+          // Calculate the previous positions based on velocity
+          const trailLength = ball.trailLength || ballTrailLength;
+          const trailColor = ball.trailColor || ballTrailColor;
+          
+          for (let i = 1; i <= trailLength; i++) {
+            const trailOpacity = 1 - (i / trailLength);
+            const trailSize = ball.radius * (1 - (i / (trailLength * 2)));
+            
+            // Calculate trail position, going backwards based on velocity
+            const trailPos = {
+              x: ball.position.x - (ball.velocity.x * i * 0.5),
+              y: ball.position.y - (ball.velocity.y * i * 0.5)
+            };
+            
+            // Draw trail particle
+            ctx.beginPath();
+            ctx.arc(
+              trailPos.x,
+              trailPos.y,
+              trailSize,
+              0,
+              Math.PI * 2
+            );
+            
+            // Apply trail color with fading opacity
+            ctx.fillStyle = trailColor.startsWith('#') 
+              ? `${trailColor}${Math.floor(trailOpacity * 255).toString(16).padStart(2, '0')}`
+              : `rgba(255, 255, 255, ${trailOpacity})`;
+              
+            ctx.fill();
+          }
+        }
+        
         // Si la balle a une image et que les images personnalisées sont activées
         if (useCustomImages && ball.image) {
           // Dessiner l'image centrée sur la position de la balle, avec la taille correspondant au diamètre
@@ -1155,12 +1456,15 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
           );
           
           // Ajouter un contour
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-          ctx.lineWidth = 2;
-          ctx.stroke();
+          if (ball.strokeWidth && ball.strokeWidth > 0 || ballStrokeWidth > 0) {
+            ctx.strokeStyle = ball.strokeColor || ballStrokeColor;
+            ctx.lineWidth = ball.strokeWidth || ballStrokeWidth;
+            ctx.stroke();
+          }
+          
           ctx.restore();
         } else {
-          // Dessin standard pour les balles sans image
+          // Dessin amélioré pour les balles sans image
           ctx.beginPath();
           ctx.arc(
             ball.position.x,
@@ -1169,11 +1473,163 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
             0,
             Math.PI * 2
           );
-          ctx.fillStyle = ball.color;
+          
+          // Apply ball theme or custom color
+          let ballFillColor: string | CanvasGradient = ball.color;
+          
+          if (ball.customColor) {
+            // Using custom color for this ball
+            ballFillColor = ball.customColor;
+            console.log("Applied custom ball color:", ball.customColor);
+          } else if (ball.theme) {
+            // Using specific theme from ball property
+            console.log("Applied ball-specific theme:", ball.theme);
+            switch(ball.theme) {
+              case 'rainbow':
+                // Create rainbow effect based on time
+                const rainbowTime = performance.now() / 1000;
+                const hue = (rainbowTime * 50) % 360;
+                ballFillColor = `hsl(${hue}, 100%, 50%)`;
+                break;
+              case 'fire':
+                // Create fire effect with gradient
+                const fireGradient = ctx.createRadialGradient(
+                  ball.position.x, ball.position.y, 0,
+                  ball.position.x, ball.position.y, ball.radius
+                );
+                fireGradient.addColorStop(0, 'yellow');
+                fireGradient.addColorStop(0.7, 'orange');
+                fireGradient.addColorStop(1, 'red');
+                ballFillColor = fireGradient;
+                break;
+              case 'ice':
+                // Create ice effect with gradient
+                const iceGradient = ctx.createRadialGradient(
+                  ball.position.x, ball.position.y, 0,
+                  ball.position.x, ball.position.y, ball.radius
+                );
+                iceGradient.addColorStop(0, 'white');
+                iceGradient.addColorStop(0.7, 'lightblue');
+                iceGradient.addColorStop(1, 'blue');
+                ballFillColor = iceGradient;
+                break;
+              case 'neon':
+                // Create neon effect
+                ballFillColor = '#0ff';
+                // Will add glow later
+                break;
+              default:
+                // Use the default color
+                ballFillColor = ball.color;
+            }
+          } else if (ballTheme !== 'default') {
+            // Apply global theme if ball doesn't have specific theme
+            console.log("Applied global ball theme:", ballTheme);
+            switch(ballTheme) {
+              case 'rainbow':
+                // Create rainbow effect based on time and ball index
+                const rainbowTime = performance.now() / 1000;
+                const hue = (rainbowTime * 50) % 360;
+                ballFillColor = `hsl(${hue}, 100%, 50%)`;
+                break;
+              case 'fire':
+                // Create fire effect with gradient
+                const fireGradient = ctx.createRadialGradient(
+                  ball.position.x, ball.position.y, 0,
+                  ball.position.x, ball.position.y, ball.radius
+                );
+                fireGradient.addColorStop(0, 'yellow');
+                fireGradient.addColorStop(0.7, 'orange');
+                fireGradient.addColorStop(1, 'red');
+                ballFillColor = fireGradient;
+                break;
+              case 'ice':
+                // Create ice effect with gradient
+                const iceGradient = ctx.createRadialGradient(
+                  ball.position.x, ball.position.y, 0,
+                  ball.position.x, ball.position.y, ball.radius
+                );
+                iceGradient.addColorStop(0, 'white');
+                iceGradient.addColorStop(0.7, 'lightblue');
+                iceGradient.addColorStop(1, 'blue');
+                ballFillColor = iceGradient;
+                break;
+              case 'neon':
+                // Create neon effect
+                ballFillColor = '#0ff';
+                // Will add glow later
+                break;
+              default:
+                // Use the default color or global custom ball color
+                ballFillColor = customBallColor || ball.color;
+            }
+          } else if (customBallColor) {
+            // Use global custom ball color
+            console.log("Applied global custom ball color:", customBallColor);
+            ballFillColor = customBallColor;
+          }
+          
+          // Apply the ball fill color
+          ctx.fillStyle = ballFillColor;
           ctx.fill();
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-          ctx.lineWidth = 2;
-          ctx.stroke();
+          
+          // Add glow effect if enabled
+          if ((ball.hasGlow === true) || (ballHasGlow === true) || 
+              ball.theme === 'neon' || ballTheme === 'neon') {
+            
+            // Set default glow size if not specified
+            let effectiveGlowSize = 5;
+            
+            // Use ball-specific glow size if available, otherwise use global setting
+            if (typeof ball.glowSize === 'number') {
+              effectiveGlowSize = ball.glowSize;
+            } else if (typeof ballGlowSize === 'number') {
+              effectiveGlowSize = ballGlowSize;
+            }
+            
+            let glowColor = ball.glowColor || ballGlowColor;
+            
+            // For neon theme, use cyan glow
+            if (ball.theme === 'neon' || ballTheme === 'neon') {
+              glowColor = ball.glowColor || '#0ff';
+            }
+            
+            // Save current shadow settings
+            const prevShadowColor = ctx.shadowColor;
+            const prevShadowBlur = ctx.shadowBlur;
+            
+            // Apply glow effect using shadow
+            ctx.shadowColor = glowColor;
+            ctx.shadowBlur = effectiveGlowSize * 5;
+            
+            // Draw another circle with same path for the glow
+            ctx.beginPath();
+            ctx.arc(
+              ball.position.x,
+              ball.position.y,
+              ball.radius,
+              0,
+              Math.PI * 2
+            );
+            ctx.fillStyle = ballFillColor;
+            ctx.fill();
+            
+            // Restore previous shadow settings
+            ctx.shadowColor = prevShadowColor;
+            ctx.shadowBlur = prevShadowBlur;
+          }
+          
+          // Add stroke/outline if enabled
+          if ((ball.strokeWidth && ball.strokeWidth > 0) || ballStrokeWidth > 0) {
+            ctx.strokeStyle = ball.strokeColor || ballStrokeColor;
+            ctx.lineWidth = ball.strokeWidth || ballStrokeWidth;
+            ctx.stroke();
+          } else {
+            // Default subtle stroke
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
         }
       });
 
@@ -1239,7 +1695,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         requestRef.current = undefined;
       }
     };
-  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound, customExitSoundVolume, customWallSound, enableWallSound, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate, remainingCirclesPrefix, remainingCirclesBgColor, remainingCirclesTextColor, playMidiOnDoorDestroy, midiVolume, playMusicOnDoorDestroy, doorDestroyMusicVolume]);
+  }, [isPlaying, gameState, gravity, bounciness, exitSizeRad, onGameEnd, maxBallSpeed, shrinkCirclesOnDestroy, shrinkFactor, baseBallRadius, circleGap, minCircleGap, minCircleRadius, ballsOnDestroy, exitStyle, particleStyle, customEndMessage, showFinalScore, useCustomSounds, customExitSound, customExitSoundVolume, customWallSound, enableWallSound, useCustomImages, loadedImages, ballImageAssignments, growing, growthRate, remainingCirclesPrefix, remainingCirclesBgColor, remainingCirclesTextColor, playMidiOnDoorDestroy, midiVolume, playMusicOnDoorDestroy, doorDestroyMusicVolume, useRainbowCircles, circleStrokeWidth, animateRainbow, circleTheme, customCircleColor, glowIntensity, gradientSpeed, customBallColor, ballHasTrail, ballTrailColor, ballTrailLength, ballStrokeWidth, ballStrokeColor, ballHasGlow, ballGlowColor, ballGlowSize, ballTheme]);
 
   // Fonction pour créer de nouvelles balles à l'emplacement d'un cercle détruit
   const createBallsOnDestroy = (centerX: number, centerY: number, circleRadius: number, sourceBall?: EnhancedBall): EnhancedBall[] => {
@@ -1253,6 +1709,9 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
     if (maxBallsToCreate <= 0) return [];
     
     const newBalls: EnhancedBall[] = [];
+    
+    // Add debug logging
+    console.log("Creating new balls with theme:", ballTheme);
     
     for (let i = 0; i < maxBallsToCreate; i++) {
       // Angle aléatoire pour la direction de la balle
@@ -1282,6 +1741,7 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         ballImage = loadedImages[imageIndex];
       }
       
+      // Create the new ball with proper theme
       newBalls.push({
         id: generateId(),
         position: { x: posX, y: posY },
@@ -1291,7 +1751,17 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
         image: ballImage,
         imageIndex: imageIndex,
         growing: growing,
-        growthRate: growthRate
+        growthRate: growthRate,
+        customColor: customBallColor,
+        hasTrail: ballHasTrail,
+        trailColor: ballTrailColor,
+        trailLength: ballTrailLength,
+        strokeWidth: ballStrokeWidth,
+        strokeColor: ballStrokeColor,
+        hasGlow: ballHasGlow,
+        glowColor: ballGlowColor,
+        glowSize: ballGlowSize,
+        theme: ballTheme // Use the current ballTheme here
       });
     }
     
@@ -1422,6 +1892,10 @@ const CollapsingRotatingCircles: React.FC<CollapsingRotatingCirclesProps> = ({
       downloadGameplayVideo(filename);
     }
   };
+
+  // Determine the effective circle theme
+  // If useRainbowCircles is true, use RAINBOW theme for backward compatibility
+  const effectiveCircleTheme = useRainbowCircles ? CircleTheme.RAINBOW : circleTheme;
 
   return (
     <div className="tiktok-game-wrapper" style={{ position: 'relative' }}>

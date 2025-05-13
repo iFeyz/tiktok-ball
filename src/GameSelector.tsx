@@ -6,7 +6,8 @@ import TrailBall from './games/TrailBall';
 import CollapsingCircles from './games/CollapsingCircles';
 import CollapsingRotatingCircles, { 
   ExitStyle, 
-  ParticleStyle 
+  ParticleStyle,
+  CircleTheme
 } from './games/CollapsingRotatingCircles';
 import { 
   playGameStartSound, 
@@ -204,14 +205,27 @@ const GameSelector: React.FC = () => {
   const [rotatingCirclesPlayMusicOnDoorDestroy, setRotatingCirclesPlayMusicOnDoorDestroy] = useState<boolean>(true);
   const [rotatingCirclesDoorDestroyMusicVolume, setRotatingCirclesDoorDestroyMusicVolume] = useState<number>(0.5);
   
-  // Ajout des états pour les paramètres spécifiques à CollapsingRotatingCircles
-  const [initialCircleCount, setInitialCircleCount] = useState(5);
-  const [circleGap, setCircleGap] = useState(40);
-  const [exitSize, setExitSize] = useState(30); // Angle en degrés
-  const [rotationSpeed, setRotationSpeed] = useState(0.01); // Vitesse de rotation en radians par frame
-  const [maxBallSpeed, setMaxBallSpeed] = useState(8); // Vitesse maximale pour éviter que la balle ne s'échappe
-  const [shrinkCirclesOnDestroy, setShrinkCirclesOnDestroy] = useState(true); // Activé par défaut
-  const [shrinkFactor, setShrinkFactor] = useState(0.8); // Facteur de rétrécissement des cercles (80% de la taille originale)
+  // Add rainbow circle properties
+  const [useRainbowCircles, setUseRainbowCircles] = useState<boolean>(false);
+  const [circleStrokeWidth, setCircleStrokeWidth] = useState<number>(5);
+  const [animateRainbow, setAnimateRainbow] = useState<boolean>(true);
+  // Circle theme properties
+  const [circleTheme, setCircleTheme] = useState<CircleTheme>(CircleTheme.DEFAULT);
+  const [customCircleColor, setCustomCircleColor] = useState<string>('#ff0000');
+  const [glowIntensity, setGlowIntensity] = useState<number>(0.5);
+  const [gradientSpeed, setGradientSpeed] = useState<number>(1.0);
+  
+  // Ball customization properties
+  const [customBallColor, setCustomBallColor] = useState<string>('#ff4500');
+  const [ballHasTrail, setBallHasTrail] = useState<boolean>(false);
+  const [ballTrailColor, setBallTrailColor] = useState<string>('#ffffff');
+  const [ballTrailLength, setBallTrailLength] = useState<number>(10);
+  const [ballStrokeWidth, setBallStrokeWidth] = useState<number>(2);
+  const [ballStrokeColor, setBallStrokeColor] = useState<string>('#ffffff');
+  const [ballHasGlow, setBallHasGlow] = useState<boolean>(false);
+  const [ballGlowColor, setBallGlowColor] = useState<string>('#ff0000');
+  const [ballGlowSize, setBallGlowSize] = useState<number>(5);
+  const [ballTheme, setBallTheme] = useState<'default' | 'rainbow' | 'fire' | 'ice' | 'neon'>('default');
   
   // Ajout des états manquants pour la fonction de rendu
   const [showSettings, setShowSettings] = useState(false);
@@ -245,6 +259,15 @@ const GameSelector: React.FC = () => {
 
   // Ajouter un référence pour le son personnalisé de porte de sortie
   const exitSoundFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Ajout des états manquants
+  const [initialCircleCount, setInitialCircleCount] = useState(5);
+  const [circleGap, setCircleGap] = useState(40);
+  const [exitSize, setExitSize] = useState(30);
+  const [rotationSpeed, setRotationSpeed] = useState(0.01);
+  const [maxBallSpeed, setMaxBallSpeed] = useState(8);
+  const [shrinkCirclesOnDestroy, setShrinkCirclesOnDestroy] = useState(true);
+  const [shrinkFactor, setShrinkFactor] = useState(0.8);
 
   // Fonctions pour gérer les changements de style
   const handleExitStyleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -1000,6 +1023,26 @@ const GameSelector: React.FC = () => {
             midiVolume={rotatingCirclesMidiVolume}
             playMusicOnDoorDestroy={rotatingCirclesPlayMusicOnDoorDestroy}
             doorDestroyMusicVolume={rotatingCirclesDoorDestroyMusicVolume}
+            // Add rainbow circle options
+            useRainbowCircles={useRainbowCircles}
+            circleStrokeWidth={circleStrokeWidth}
+            animateRainbow={animateRainbow}
+            // Add circle theme options
+            circleTheme={circleTheme}
+            customCircleColor={customCircleColor}
+            glowIntensity={glowIntensity}
+            gradientSpeed={gradientSpeed}
+            // Add ball customization options
+            customBallColor={customBallColor}
+            ballHasTrail={ballHasTrail}
+            ballTrailColor={ballTrailColor}
+            ballTrailLength={ballTrailLength}
+            ballStrokeWidth={ballStrokeWidth}
+            ballStrokeColor={ballStrokeColor}
+            ballHasGlow={ballHasGlow}
+            ballGlowColor={ballGlowColor}
+            ballGlowSize={ballGlowSize}
+            ballTheme={ballTheme}
           />
         );
 
@@ -1100,29 +1143,6 @@ const GameSelector: React.FC = () => {
                 style={{ marginTop: '10px', backgroundColor: '#555' }}
               >
                 Retour au menu
-              </button>
-              
-              {/* Bouton d'enregistrement */}
-              <button 
-                className={`control-button record ${isRecording ? 'recording' : ''}`}
-                onClick={toggleRecording}
-                style={{
-                  background: isRecording ? '#ff4444' : '#333',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '5px',
-                  marginTop: '10px'
-                }}
-              >
-                <div style={{ 
-                  width: '10px', 
-                  height: '10px', 
-                  borderRadius: '50%', 
-                  backgroundColor: isRecording ? 'white' : 'red',
-                  animation: isRecording ? 'pulse 1s infinite' : 'none'
-                }}></div>
-                {isRecording ? 'Arrêter l\'enregistrement' : 'Enregistrer'}
               </button>
             </>
           )}
@@ -2383,7 +2403,7 @@ const GameSelector: React.FC = () => {
           <input 
             type="range" 
             min="1" 
-            max="30" 
+            max="50" 
             step="1" 
             value={baseBallRadius}
             onChange={handleBaseBallRadiusChange}
@@ -2459,7 +2479,7 @@ const GameSelector: React.FC = () => {
             type="range" 
             min="5" 
             max="100" 
-            step="5" 
+            step="1" 
             value={maxBallCount}
             onChange={handleMaxBallCountChange}
           />
@@ -2508,7 +2528,7 @@ const GameSelector: React.FC = () => {
           <label>Vitesse maximale de la balle: {maxBallSpeed.toFixed(1)}</label>
           <input 
             type="range" 
-            min="5" 
+            min="1" 
             max="20" 
             step="0.5" 
             value={maxBallSpeed}
@@ -2620,98 +2640,332 @@ const GameSelector: React.FC = () => {
           </div>
           
           <div className="control">
-            <label>Couleur de fond:</label>
-            <div className="color-picker-container">
-              <input 
-                type="color" 
-                value={remainingCirclesBgColor}
-                onChange={(e) => setRemainingCirclesBgColor(e.target.value)}
-                style={{ 
-                  width: '40px', 
-                  height: '40px',
-                  border: 'none',
-                  padding: '0',
-                  background: 'none'
-                }}
-              />
-              <input 
-                type="text" 
-                value={remainingCirclesBgColor}
-                onChange={(e) => setRemainingCirclesBgColor(e.target.value)}
-                style={{ 
-                  width: '100px', 
-                  marginLeft: '10px',
-                  padding: '5px',
-                  borderRadius: '4px',
-                  border: '1px solid #555',
-                  backgroundColor: '#333',
-                  color: 'white'
-                }}
-              />
-            </div>
+            <label>Couleur du fond texte:</label>
+            <input 
+              type="color" 
+              value={remainingCirclesBgColor}
+              onChange={(e) => setRemainingCirclesBgColor(e.target.value)}
+              style={{ 
+                width: '100%', 
+                height: '40px', 
+                border: 'none',
+                borderRadius: '4px', 
+                marginTop: '5px'
+              }}
+            />
             <div className="control-hint">
-              Couleur de fond du texte des cercles restants
+              Couleur de fond de l'indicateur de cercles restants
             </div>
           </div>
           
           <div className="control">
             <label>Couleur du texte:</label>
-            <div className="color-picker-container">
-              <input 
-                type="color" 
-                value={remainingCirclesTextColor}
-                onChange={(e) => setRemainingCirclesTextColor(e.target.value)}
-                style={{ 
-                  width: '40px', 
-                  height: '40px',
-                  border: 'none',
-                  padding: '0',
-                  background: 'none'
-                }}
-              />
-              <input 
-                type="text" 
-                value={remainingCirclesTextColor}
-                onChange={(e) => setRemainingCirclesTextColor(e.target.value)}
-                style={{ 
-                  width: '100px', 
-                  marginLeft: '10px',
-                  padding: '5px',
-                  borderRadius: '4px',
-                  border: '1px solid #555',
-                  backgroundColor: '#333',
-                  color: 'white'
-                }}
-              />
-            </div>
+            <input 
+              type="color" 
+              value={remainingCirclesTextColor}
+              onChange={(e) => setRemainingCirclesTextColor(e.target.value)}
+              style={{ 
+                width: '100%', 
+                height: '40px', 
+                border: 'none',
+                borderRadius: '4px', 
+                marginTop: '5px'
+              }}
+            />
             <div className="control-hint">
-              Couleur du texte pour l'affichage des cercles restants
+              Couleur du texte de l'indicateur de cercles restants
+            </div>
+          </div>
+        </div>
+        
+        {/* Circle themes and settings */}
+        <div className="rainbow-circle-settings" style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
+          <h5>Personnalisation des cercles</h5>
+          
+          <div className="control">
+            <label>Thème des cercles:</label>
+            <select 
+              className="style-select"
+              value={circleTheme}
+              onChange={(e) => handleCircleThemeChange(e.target.value as CircleTheme)}
+            >
+              <option value={CircleTheme.DEFAULT}>Par défaut (couleurs aléatoires)</option>
+              <option value={CircleTheme.RAINBOW}>Arc-en-ciel</option>
+              <option value={CircleTheme.NEON}>Néon</option>
+              <option value={CircleTheme.LAVA}>Lave</option>
+              <option value={CircleTheme.WATER}>Eau</option>
+              <option value={CircleTheme.CUSTOM}>Couleur personnalisée</option>
+            </select>
+            <div className="control-hint">
+              Choisissez un thème de couleur pour les cercles
             </div>
           </div>
           
-          {/* Aperçu du texte */}
-          <div className="text-preview" style={{ 
-            marginTop: '15px', 
-            padding: '10px',
-            borderRadius: '4px',
-            border: '1px solid #555',
-            textAlign: 'center'
-          }}>
-            <div style={{
-              display: 'inline-block',
-              padding: '8px 12px',
-              borderRadius: '4px',
-              backgroundColor: remainingCirclesBgColor,
-              color: remainingCirclesTextColor,
-              fontWeight: 'bold',
-              fontSize: '16px'
-            }}>
-              {remainingCirclesPrefix}: 5
+          {circleTheme === CircleTheme.CUSTOM && (
+            <div className="control">
+              <label>Couleur personnalisée:</label>
+              <input 
+                type="color" 
+                value={customCircleColor}
+                onChange={handleCustomCircleColorChange}
+                style={{ width: '100%', height: '40px', cursor: 'pointer' }}
+              />
+              <div className="control-hint">
+                Sélectionnez une couleur pour tous les cercles
+              </div>
             </div>
+          )}
+          
+          {(circleTheme === CircleTheme.RAINBOW || circleTheme === CircleTheme.LAVA || circleTheme === CircleTheme.WATER) && (
+            <>
+              <div className="control toggle-control">
+                <label className="toggle-label">
+                  Animer les couleurs:
+                  <button 
+                    className={`toggle-button ${animateRainbow ? 'active' : ''}`}
+                    onClick={handleAnimateRainbowToggle}
+                  >
+                    {animateRainbow ? 'ON' : 'OFF'}
+                  </button>
+                </label>
+                <div className="control-hint">
+                  Permet aux couleurs de changer avec le temps pour un effet plus dynamique
+                </div>
+              </div>
+              
+              {animateRainbow && (
+                <div className="control">
+                  <label>Vitesse d'animation: {gradientSpeed.toFixed(1)}</label>
+                  <input 
+                    type="range" 
+                    min="0.1" 
+                    max="3" 
+                    step="0.1" 
+                    value={gradientSpeed}
+                    onChange={handleGradientSpeedChange}
+                  />
+                  <div className="control-hint">
+                    Contrôle la vitesse de changement des couleurs
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          
+          {circleTheme === CircleTheme.NEON && (
+            <div className="control">
+              <label>Intensité de la lueur: {Math.round(glowIntensity * 100)}%</label>
+              <input 
+                type="range" 
+                min="0" 
+                max="1" 
+                step="0.05" 
+                value={glowIntensity}
+                onChange={handleGlowIntensityChange}
+              />
+              <div className="control-hint">
+                Ajuste l'intensité de l'effet lumineux néon
+              </div>
+            </div>
+          )}
+          
+          <div className="control">
+            <label>Épaisseur des cercles: {circleStrokeWidth}px</label>
+            <input 
+              type="range" 
+              min="1" 
+              max="15" 
+              step="1" 
+              value={circleStrokeWidth}
+              onChange={handleCircleStrokeWidthChange}
+            />
             <div className="control-hint">
-              Aperçu du texte des cercles restants
+              Ajuste l'épaisseur des traits des cercles
             </div>
           </div>
+          
+          {/* Legacy option for backward compatibility */}
+          <div className="control toggle-control" style={{ display: 'none' }}>
+            <label className="toggle-label">
+              Cercles arc-en-ciel:
+              <button 
+                className={`toggle-button ${useRainbowCircles ? 'active' : ''}`}
+                onClick={handleUseRainbowCirclesToggle}
+              >
+                {useRainbowCircles ? 'ON' : 'OFF'}
+              </button>
+            </label>
+          </div>
+        </div>
+        
+        {/* Ball customization section */}
+        <div className="ball-customization-section" style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
+          <h5>Personnalisation des Balles</h5>
+          
+          <div className="control">
+            <label>Thème des balles:</label>
+            <select 
+              className="style-select"
+              value={ballTheme}
+              onChange={handleBallThemeChange}
+              style={{ 
+                padding: "10px", 
+                fontSize: "16px", 
+                width: "100%",
+                marginBottom: "10px",
+                borderColor: ballTheme !== 'default' ? '#4CAF50' : '#ccc',
+                backgroundColor: ballTheme !== 'default' ? '#f0fff0' : '#fff' 
+              }}
+            >
+              <option value="default">Par défaut (couleurs aléatoires)</option>
+              <option value="rainbow">Arc-en-ciel</option>
+              <option value="fire">Feu</option>
+              <option value="ice">Glace</option>
+              <option value="neon">Néon</option>
+            </select>
+            <div className="control-hint">
+              Choisissez un thème visuel pour les balles (sélection actuelle: <strong>{ballTheme}</strong>)
+            </div>
+          </div>
+          
+          {ballTheme === 'default' && (
+            <div className="control">
+              <label>Couleur personnalisée:</label>
+              <input 
+                type="color" 
+                value={customBallColor}
+                onChange={handleCustomBallColorChange}
+                style={{ width: '100%', height: '40px', cursor: 'pointer' }}
+              />
+              <div className="control-hint">
+                Sélectionnez une couleur pour toutes les balles
+              </div>
+            </div>
+          )}
+          
+          <div className="control toggle-control">
+            <label className="toggle-label">
+              Traînée lumineuse:
+              <button 
+                className={`toggle-button ${ballHasTrail ? 'active' : ''}`}
+                onClick={handleBallTrailToggle}
+              >
+                {ballHasTrail ? 'ON' : 'OFF'}
+              </button>
+            </label>
+            <div className="control-hint">
+              Ajoute un effet de traînée derrière les balles en mouvement
+            </div>
+          </div>
+          
+          {ballHasTrail && (
+            <>
+              <div className="control">
+                <label>Couleur de la traînée:</label>
+                <input 
+                  type="color" 
+                  value={ballTrailColor}
+                  onChange={handleBallTrailColorChange}
+                  style={{ width: '100%', height: '40px', cursor: 'pointer' }}
+                />
+                <div className="control-hint">
+                  Couleur des particules de la traînée
+                </div>
+              </div>
+              
+              <div className="control">
+                <label>Longueur de la traînée: {ballTrailLength}</label>
+                <input 
+                  type="range" 
+                  min="1" 
+                  max="20" 
+                  step="1" 
+                  value={ballTrailLength}
+                  onChange={handleBallTrailLengthChange}
+                />
+                <div className="control-hint">
+                  Nombre de particules dans la traînée
+                </div>
+              </div>
+            </>
+          )}
+          
+          <div className="control">
+            <label>Épaisseur du contour: {ballStrokeWidth}px</label>
+            <input 
+              type="range" 
+              min="0" 
+              max="10" 
+              step="1" 
+              value={ballStrokeWidth}
+              onChange={handleBallStrokeWidthChange}
+            />
+            <div className="control-hint">
+              Épaisseur du contour des balles (0 pour désactiver)
+            </div>
+          </div>
+          
+          {ballStrokeWidth > 0 && (
+            <div className="control">
+              <label>Couleur du contour:</label>
+              <input 
+                type="color" 
+                value={ballStrokeColor}
+                onChange={handleBallStrokeColorChange}
+                style={{ width: '100%', height: '40px', cursor: 'pointer' }}
+              />
+              <div className="control-hint">
+                Couleur du contour des balles
+              </div>
+            </div>
+          )}
+          
+          <div className="control toggle-control">
+            <label className="toggle-label">
+              Effet lumineux:
+              <button 
+                className={`toggle-button ${ballHasGlow ? 'active' : ''}`}
+                onClick={handleBallGlowToggle}
+              >
+                {ballHasGlow ? 'ON' : 'OFF'}
+              </button>
+            </label>
+            <div className="control-hint">
+              Ajoute un effet lumineux autour des balles
+            </div>
+          </div>
+          
+          {ballHasGlow && (
+            <>
+              <div className="control">
+                <label>Couleur de l'effet:</label>
+                <input 
+                  type="color" 
+                  value={ballGlowColor}
+                  onChange={handleBallGlowColorChange}
+                  style={{ width: '100%', height: '40px', cursor: 'pointer' }}
+                />
+                <div className="control-hint">
+                  Couleur de l'effet lumineux
+                </div>
+              </div>
+              
+              <div className="control">
+                <label>Intensité lumineuse: {ballGlowSize}</label>
+                <input 
+                  type="range" 
+                  min="1" 
+                  max="10" 
+                  step="1" 
+                  value={ballGlowSize}
+                  onChange={handleBallGlowSizeChange}
+                />
+                <div className="control-hint">
+                  Intensité de l'effet lumineux
+                </div>
+              </div>
+            </>
+          )}
         </div>
         
         {/* Sons personnalisés */}
@@ -3223,6 +3477,90 @@ const GameSelector: React.FC = () => {
     setRotatingCirclesDoorDestroyMusicVolume(parseFloat(e.target.value));
   };
 
+  // Rainbow circle handlers
+  const handleUseRainbowCirclesToggle = () => {
+    setUseRainbowCircles(prev => !prev);
+    // If enabling rainbow circles, set the theme to RAINBOW
+    if (!useRainbowCircles) {
+      setCircleTheme(CircleTheme.RAINBOW);
+    }
+  };
+
+  const handleCircleStrokeWidthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setCircleStrokeWidth(parseInt(e.target.value, 10));
+  };
+
+  const handleAnimateRainbowToggle = () => {
+    setAnimateRainbow(prev => !prev);
+  };
+  
+  // New circle theme handlers
+  const handleCircleThemeChange = (theme: CircleTheme) => {
+    setCircleTheme(theme);
+    // If setting to RAINBOW, enable useRainbowCircles for backward compatibility
+    if (theme === CircleTheme.RAINBOW) {
+      setUseRainbowCircles(true);
+    } else {
+      setUseRainbowCircles(false);
+    }
+  };
+  
+  const handleCustomCircleColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setCustomCircleColor(e.target.value);
+  };
+  
+  const handleGlowIntensityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setGlowIntensity(parseFloat(e.target.value));
+  };
+  
+  const handleGradientSpeedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setGradientSpeed(parseFloat(e.target.value));
+  };
+  
+  // Add handlers for ball customization
+  const handleCustomBallColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setCustomBallColor(e.target.value);
+  };
+
+  const handleBallTrailToggle = () => {
+    setBallHasTrail(!ballHasTrail);
+  };
+
+  const handleBallTrailColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBallTrailColor(e.target.value);
+  };
+
+  const handleBallTrailLengthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBallTrailLength(parseInt(e.target.value, 10));
+  };
+
+  const handleBallStrokeWidthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBallStrokeWidth(parseInt(e.target.value, 10));
+  };
+
+  const handleBallStrokeColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBallStrokeColor(e.target.value);
+  };
+
+  const handleBallGlowToggle = () => {
+    setBallHasGlow(!ballHasGlow);
+  };
+
+  const handleBallGlowColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBallGlowColor(e.target.value);
+  };
+
+  const handleBallGlowSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBallGlowSize(parseInt(e.target.value, 10));
+  };
+
+  const handleBallThemeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    // Explicitly cast to the specific theme type to ensure correct type safety
+    const selectedTheme = e.target.value as 'default' | 'rainbow' | 'fire' | 'ice' | 'neon';
+    console.log("Ball theme changed to:", selectedTheme); // Add logging for debugging
+    setBallTheme(selectedTheme);
+  };
+  
   // Render function for the main component with sidebar layout
   return (
     <div className="app-container">
