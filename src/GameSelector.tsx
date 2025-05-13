@@ -2439,6 +2439,22 @@ const GameSelector: React.FC = () => {
           </div>
         </div>
         
+        {/* Add back the ball size control */}
+        <div className="control">
+          <label>Taille des balles (rayon en pixels): {baseBallRadius}</label>
+          <input 
+            type="range" 
+            min="5" 
+            max="50" 
+            step="1" 
+            value={baseBallRadius}
+            onChange={handleBaseBallRadiusChange}
+          />
+          <div className="control-hint">
+            Ajuste la taille des balles qui naviguent entre les cercles
+          </div>
+        </div>
+        
         {/* Existing circle theme selection */}
         <div className="control">
           <label>Thème de couleur:</label>
@@ -2591,7 +2607,7 @@ const GameSelector: React.FC = () => {
             type="range" 
             min="1" 
             max="100" 
-            step="1" 
+            step="5" 
             value={circleGap}
             onChange={handleCircleGapChange}
           />
